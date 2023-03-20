@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "prompt-tts"
+version = "0.1.0"
+description = ""
+authors = ["Khai Doan <Duy.Doan@mbzuai.ac.ae"]
+readme = "README.md"
+packages = [{include = "prompt_tts"}]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+encodec = "^0.1.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
