@@ -85,9 +85,13 @@ class SingleSpeakerDataset(Dataset):
 def tts_collation_fn(batch):
     batch_code = []
     batch_text = []
+    batch_len = []
+    batch_cmu = []
     for item in batch:
         batch_code.append(item["code"])
         batch_text.append(item["text"])
+        batch_len.append(item["code_length"])
+        batch_cmu.append(item["cmu_sequence"])
     
     if "text_norm" in batch[0].keys():
         batch_text_norm = [item["text_norm"] for item in batch]
@@ -95,12 +99,16 @@ def tts_collation_fn(batch):
         return {
             "code": torch.tensor(np.array(batch_code)).squeeze(),
             "text": batch_text,
-            "text_norm": batch_text_norm
+            "text_norm": batch_text_norm,
+            "code_length": batch_len,
+            "cmu_sequence": batch_cmu
         }
     else:
         return {
             "code": torch.tensor(np.array(batch_code)).squeeze(),
-            "text": batch_text
+            "text": batch_text,
+            "code_length": batch_len,
+            "cmu_sequence": batch_cmu
         }
 
 
