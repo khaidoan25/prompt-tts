@@ -4,11 +4,21 @@ import webdataset as wds
 import tarfile
 import numpy as np
 from io import BytesIO, TextIOWrapper
+from utils import get_cwd
+from process_text import text_to_sequence, cmudict, sequence_to_text
+from process_text.symbols import symbols
+
+def intersperse(lst, item):
+  result = [item] * (len(lst) * 2 + 1)
+  result[1::2] = lst
+  return result
 
 
 class SingleSpeakerDataset(Dataset):
     def __init__(self, data_path) -> None:
         super().__init__()
+        cwd = get_cwd()    
+        cmu_dict = cmudict.CMUDict(cwd + "/tts/process_text/cmu_dictionary")
         
         tf = tarfile.open(data_path, "r")
         npy_file = []
@@ -26,17 +36,27 @@ class SingleSpeakerDataset(Dataset):
             array_file.write(tf.extractfile(codec_file).read())
             array_file.seek(0)
             codec_code = np.load(array_file)
-            # text = open(tf.extracfile(codec_file.replace(".npy", ".txt")), "r").read()
+            
             text = TextIOWrapper(
                 tf.extractfile(codec_file.replace(".npy", ".txt"))
             ).read()
             
+            cmu_sequence = intersperse(
+                text_to_sequence(text, ["english_cleaners"], cmu_dict),
+                len(symbols)
+            )
+            
+            length = float(TextIOWrapper(
+                tf.extractfile(codec_file.replace(".npy", ".len.txt"))
+            ).read())
             
             if codec_file.replace(".npy", ".normalized.txt") not in txt_file:
                 self.item_list.append(
                     {
                         "code": codec_code,
                         "text": text,
+                        "cmu_sequence": cmu_sequence,
+                        "code_length": length
                     }
                 )
             else:                
@@ -48,7 +68,9 @@ class SingleSpeakerDataset(Dataset):
                     {
                         "code": codec_code,
                         "text": text,
-                        "text_norm": text_norm
+                        "text_norm": text_norm,
+                        "cmu_sequence": cmu_sequence,
+                        "code_length": length
                     }
                 )
             
