@@ -17,7 +17,7 @@ model.to(device)
 
 def create_batch(members, tf, batch_size):
     index = 1
-    batch = [[], []]
+    batch = [[], [], []]    # wav, name, codec_length
     for member in members:
         if ".wav" not in member.name:
             continue
@@ -27,12 +27,13 @@ def create_batch(members, tf, batch_size):
             wav = wav[:1]
         wav = convert_audio(wav, sr, model.sample_rate, model.channels)
         # Pad the wavfile to 20s duration
+        batch[2].append(np.ceil(wav.shape[1] / 320))
         wav = torch.cat([wav, torch.zeros((1, model.sample_rate*20-wav.shape[1]))], dim=-1)
         wav = wav.unsqueeze(0)
         batch[0].append(wav)
         if index % batch_size == 0:
             yield batch
-            batch = [[], []]
+            batch = [[], [], []]
         index += 1
     if len(batch) != 0:
         yield batch
@@ -63,6 +64,12 @@ def main(input_file, batch_size):
                 np.save(abspath(f"{dirname}/{np_file}"), code)
                 output_tf.add(abspath(f"{dirname}/{np_file}"), arcname=np_file)
                 
+                # save length
+                len_file = np_file.replace(".npy", ".len.txt")
+                with open(abspath(f"{dirname}/{len_file}"), "w") as f:
+                    f.write(str(batch[2][i]))
+                output_tf.add(abspath(f"{dirname}/{len_file}"), arcname=len_file)
+                
     # Move all text file to output tarfile
     with TemporaryDirectory() as dirname:
         for member in members:
@@ -70,6 +77,7 @@ def main(input_file, batch_size):
                 tf.extract(member, dirname)
                 suffix = member.name.split('/')[-1]
                 output_tf.add(abspath(f"{dirname}/{member.name}"), arcname=suffix)
+                
     
     tf.close()
     output_tf.close()
