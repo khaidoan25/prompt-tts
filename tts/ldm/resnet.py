@@ -95,10 +95,10 @@ class ResnetBlock1D(nn.Module):
             self.time_emb_proj = None
 
         # if self.time_embedding_norm == "ada_group":
-        #     self.norm1 = AdaGroupNorm(temb_channels, in_channels, groups, eps=eps)
+        #     self.norm2 = AdaGroupNorm(temb_channels, in_channels, groups, eps=eps)
         # else:
         if self.time_embedding_norm == "default":
-            self.norm1 = torch.nn.GroupNorm(num_groups=groups, num_channels=in_channels, eps=eps, affine=True)
+            self.norm2 = torch.nn.GroupNorm(num_groups=groups, num_channels=in_channels, eps=eps, affine=True)
 
         self.dropout = torch.nn.Dropout(dropout)
         conv_1d_out_channels = conv_1d_out_channels or out_channels
@@ -167,7 +167,7 @@ class ResnetBlock1D(nn.Module):
         if self.time_emb_proj is not None:
             if not self.skip_time_act:
                 temb = self.nonlinearity(temb)
-            temb = self.time_emb_proj(temb)[:, :, None, None]
+            temb = self.time_emb_proj(temb)[:, :, None]
 
         if temb is not None and self.time_embedding_norm == "default":
             hidden_states = hidden_states + temb
