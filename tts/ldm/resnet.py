@@ -131,13 +131,13 @@ class ResnetBlock1D(nn.Module):
             # else:
             self.downsample = Downsample1D(in_channels, use_conv=False, padding=1, name="op")
 
-        # self.use_in_shortcut = self.in_channels != conv_2d_out_channels if use_in_shortcut is None else use_in_shortcut
+        self.use_in_shortcut = self.in_channels != self.out_channels if use_in_shortcut is None else use_in_shortcut
 
-        # self.conv_shortcut = None
-        # if self.use_in_shortcut:
-        #     self.conv_shortcut = torch.nn.Conv2d(
-        #         in_channels, conv_2d_out_channels, kernel_size=1, stride=1, padding=0, bias=conv_shortcut_bias
-        #     )
+        self.conv_shortcut = None
+        if self.use_in_shortcut:
+            self.conv_shortcut = torch.nn.Conv1d(
+                in_channels, out_channels, kernel_size=1, stride=1, padding=0
+             )
             
             
     def forward(self, input_tensor, temb):
@@ -187,8 +187,8 @@ class ResnetBlock1D(nn.Module):
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.conv2(hidden_states)
 
-        # if self.conv_shortcut is not None:
-        #     input_tensor = self.conv_shortcut(input_tensor)
+        if self.conv_shortcut is not None:
+            input_tensor = self.conv_shortcut(input_tensor)
 
         output_tensor = (input_tensor + hidden_states) / self.output_scale_factor
 
