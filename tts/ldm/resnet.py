@@ -98,7 +98,7 @@ class ResnetBlock1D(nn.Module):
         #     self.norm2 = AdaGroupNorm(temb_channels, in_channels, groups, eps=eps)
         # else:
         if self.time_embedding_norm == "default":
-            self.norm2 = torch.nn.GroupNorm(num_groups=groups, num_channels=in_channels, eps=eps, affine=True)
+            self.norm2 = torch.nn.GroupNorm(num_groups=groups, num_channels=out_channels, eps=eps, affine=True)
 
         self.dropout = torch.nn.Dropout(dropout)
         conv_1d_out_channels = conv_1d_out_channels or out_channels
