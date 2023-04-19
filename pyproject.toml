@@ -11,6 +11,7 @@ python = "^3.8"
 encodec = "^0.1.1"
 unidecode = "^1.3.6"
 inflect = "^6.0.4"
+diffusers = "^0.15.1"
 
 
 [build-system]
