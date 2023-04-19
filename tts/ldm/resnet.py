@@ -4,8 +4,53 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from diffusers.models.resnet import ResnetBlock2D, Downsample1D, Upsample1D
+from diffusers.models.resnet import ResnetBlock2D, Downsample1D
 from diffusers.models.embeddings import Timesteps, TimestepEmbedding
+
+
+
+class Upsample1D(nn.Module):
+    """
+    An upsampling layer with an optional convolution.
+
+    Parameters:
+            channels: channels in the inputs and outputs.
+            use_conv: a bool determining if a convolution is applied.
+            use_conv_transpose:
+            out_channels:
+    """
+
+    def __init__(self, channels, use_conv=False, use_conv_transpose=False, out_channels=None, name="conv"):
+        super().__init__()
+        self.channels = channels
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.use_conv_transpose = use_conv_transpose
+        self.name = name
+
+        self.conv = None
+        if use_conv_transpose:
+            self.conv = nn.ConvTranspose1d(channels, self.out_channels, 4, 2, 1)
+        elif use_conv:
+            self.conv = nn.Conv1d(self.channels, self.out_channels, 3, padding=1)
+
+    def forward(self, x, output_size=None):
+        assert x.shape[1] == self.channels
+        if self.use_conv_transpose:
+            return self.conv(x)
+
+        if output_size is None:
+            x = F.interpolate(x, scale_factor=2.0, mode="nearest")
+        else:
+            x = F.interpolate(x, size=output_size, mode="nearest")
+
+        if self.use_conv:
+            x = self.conv(x)
+
+        return x
+
+
+
 
 
 class ResnetBlock1D(nn.Module):
@@ -98,7 +143,7 @@ class ResnetBlock1D(nn.Module):
         #     self.norm2 = AdaGroupNorm(temb_channels, in_channels, groups, eps=eps)
         # else:
         if self.time_embedding_norm == "default":
-            self.norm2 = torch.nn.GroupNorm(num_groups=groups, num_channels=in_channels, eps=eps, affine=True)
+            self.norm2 = torch.nn.GroupNorm(num_groups=groups, num_channels=out_channels, eps=eps, affine=True)
 
         self.dropout = torch.nn.Dropout(dropout)
         conv_1d_out_channels = conv_1d_out_channels or out_channels
@@ -131,13 +176,13 @@ class ResnetBlock1D(nn.Module):
             # else:
             self.downsample = Downsample1D(in_channels, use_conv=False, padding=1, name="op")
 
-        # self.use_in_shortcut = self.in_channels != conv_2d_out_channels if use_in_shortcut is None else use_in_shortcut
+        self.use_in_shortcut = self.in_channels != self.out_channels if use_in_shortcut is None else use_in_shortcut
 
-        # self.conv_shortcut = None
-        # if self.use_in_shortcut:
-        #     self.conv_shortcut = torch.nn.Conv2d(
-        #         in_channels, conv_2d_out_channels, kernel_size=1, stride=1, padding=0, bias=conv_shortcut_bias
-        #     )
+        self.conv_shortcut = None
+        if self.use_in_shortcut:
+            self.conv_shortcut = torch.nn.Conv2d(
+                in_channels, out_channels, kernel_size=1, stride=1, padding=0
+            )
             
             
     def forward(self, input_tensor, temb):
@@ -187,8 +232,8 @@ class ResnetBlock1D(nn.Module):
         hidden_states = self.dropout(hidden_states)
         hidden_states = self.conv2(hidden_states)
 
-        # if self.conv_shortcut is not None:
-        #     input_tensor = self.conv_shortcut(input_tensor)
+        if self.conv_shortcut is not None:
+            input_tensor = self.conv_shortcut(input_tensor)
 
         output_tensor = (input_tensor + hidden_states) / self.output_scale_factor
 
