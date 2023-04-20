@@ -180,9 +180,9 @@ class ResnetBlock1D(nn.Module):
 
         self.conv_shortcut = None
         if self.use_in_shortcut:
-            self.conv_shortcut = torch.nn.Conv2d(
+            self.conv_shortcut = torch.nn.Conv1d(
                 in_channels, out_channels, kernel_size=1, stride=1, padding=0
-            )
+             )
             
             
     def forward(self, input_tensor, temb):
