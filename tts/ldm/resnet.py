@@ -50,7 +50,51 @@ class Upsample1D(nn.Module):
         return x
 
 
+class Downsample1D(nn.Module):
+    """
+    A downsampling layer with an optional convolution.
 
+    Parameters:
+        channels: channels in the inputs and outputs.
+        use_conv: a bool determining if a convolution is applied.
+        out_channels:
+        padding:
+    """
+
+    def __init__(self, channels, use_conv=False, out_channels=None, padding=1, name="conv"):
+        super().__init__()
+        self.channels = channels
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.padding = padding
+        stride = 2
+        self.name = name
+
+        if use_conv:
+            conv = nn.Conv1d(self.channels, self.out_channels, 3, stride=stride, padding=padding)
+        else:
+            assert self.channels == self.out_channels
+            conv = nn.AvgPool1d(kernel_size=stride, stride=stride)
+
+        # TODO(Suraj, Patrick) - clean up after weight dicts are correctly renamed
+        if name == "conv":
+            self.Conv1d_0 = conv
+            self.conv = conv
+        elif name == "Conv1d_0":
+            self.conv = conv
+        else:
+            self.conv = conv
+
+    def forward(self, hidden_states):
+        assert hidden_states.shape[1] == self.channels
+        if self.use_conv and self.padding == 0:
+            pad = (0, 1)
+            hidden_states = F.pad(hidden_states, pad, mode="constant", value=0)
+
+        assert hidden_states.shape[1] == self.channels
+        hidden_states = self.conv(hidden_states)
+
+        return hidden_states
 
 
 class ResnetBlock1D(nn.Module):

@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from unet_blocks import (
+from ldm.unet_blocks import (
     get_down_block,
     get_up_block,
     UNetMidBlock1DCrossAttn,
@@ -140,7 +140,6 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         cross_attention_dim: Union[int, Tuple[int]] = 1280,
         encoder_hid_dim: Optional[int] = None,
         attention_head_dim: Union[int, Tuple[int]] = 8,
-        dual_cross_attention: bool = False,
         use_linear_projection: bool = False,
         class_embed_type: Optional[str] = None,
         num_class_embeds: Optional[int] = None,
@@ -158,6 +157,7 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         class_embeddings_concat: bool = False,
         mid_block_only_cross_attention: Optional[bool] = None,
         cross_attention_norm: Optional[str] = None,
+        use_timestep_embedding: bool = True,
     ):
         super().__init__()
 
@@ -194,7 +194,7 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         # input
         conv_in_padding = (conv_in_kernel - 1) // 2
-        self.conv_in = nn.Conv2d(
+        self.conv_in = nn.Conv1d(
             in_channels, block_out_channels[0], kernel_size=conv_in_kernel, padding=conv_in_padding
         )
 
@@ -321,7 +321,6 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 cross_attention_dim=cross_attention_dim[i],
                 attn_num_head_channels=attention_head_dim[i],
                 downsample_padding=downsample_padding,
-                dual_cross_attention=dual_cross_attention,
                 use_linear_projection=use_linear_projection,
                 only_cross_attention=only_cross_attention[i],
                 upcast_attention=upcast_attention,
@@ -344,7 +343,6 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 cross_attention_dim=cross_attention_dim[-1],
                 attn_num_head_channels=attention_head_dim[-1],
                 resnet_groups=norm_num_groups,
-                dual_cross_attention=dual_cross_attention,
                 use_linear_projection=use_linear_projection,
                 upcast_attention=upcast_attention,
             )
@@ -391,7 +389,6 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 resnet_groups=norm_num_groups,
                 cross_attention_dim=reversed_cross_attention_dim[i],
                 attn_num_head_channels=reversed_attention_head_dim[i],
-                dual_cross_attention=dual_cross_attention,
                 use_linear_projection=use_linear_projection,
                 only_cross_attention=only_cross_attention[i],
                 upcast_attention=upcast_attention,
@@ -581,7 +578,6 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 A kwargs dictionary that if specified is passed along to the `AttentionProcessor` as defined under
                 `self.processor` in
                 [diffusers.cross_attention](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/cross_attention.py).
-
         Returns:
             [`~models.unet_2d_condition.UNet2DConditionOutput`] or `tuple`:
             [`~models.unet_2d_condition.UNet2DConditionOutput`] if `return_dict` is True, otherwise a `tuple`. When
@@ -634,7 +630,9 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
         # there might be better ways to encapsulate this.
         t_emb = t_emb.to(dtype=self.dtype)
 
-        emb = self.time_embedding(t_emb, timestep_cond)
+        emb = self.time_embedding(t_emb)
+        
+        # print("time_embedding: ", emb.size())
 
         if self.class_embedding is not None:
             if class_labels is None:
@@ -658,6 +656,8 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
 
         # 2. pre-process
         sample = self.conv_in(sample)
+        
+        # print("hidden_states_in: ", sample.size())
 
         # 3. down
         down_block_res_samples = (sample,)
@@ -670,8 +670,10 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     attention_mask=attention_mask,
                     cross_attention_kwargs=cross_attention_kwargs,
                 )
+                # print("hidden_states_down_block: ", sample.size())
             else:
                 sample, res_samples = downsample_block(hidden_states=sample, temb=emb)
+                # print("hidden_states_down_block: ", sample.size())
 
             down_block_res_samples += res_samples
 
@@ -695,6 +697,7 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                 attention_mask=attention_mask,
                 cross_attention_kwargs=cross_attention_kwargs,
             )
+            # print("hidden_states_mid_block: ", sample.size())
 
         if mid_block_additional_residual is not None:
             sample = sample + mid_block_additional_residual
@@ -717,17 +720,16 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     temb=emb,
                     res_hidden_states_tuple=res_samples,
                     encoder_hidden_states=encoder_hidden_states,
-                    cross_attention_kwargs=cross_attention_kwargs,
-                    # upsample_size=upsample_size,
-                    attention_mask=attention_mask,
+                    cross_attention_kwargs=None,
+                    upsample_size=upsample_size,
+                    attention_mask=None,
                 )
+                # print("hidden_states_up_block: ", sample.size())
             else:
                 sample = upsample_block(
-                    hidden_states=sample,
-                    temb=emb,
-                    res_hidden_states_tuple=res_samples,
-                    # upsample_size=upsample_size
+                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size
                 )
+                # print("hidden_states_up_block: ", sample.size())
 
         # 6. post-process
         if self.conv_norm_out:
