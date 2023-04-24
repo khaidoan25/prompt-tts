@@ -1,10 +1,13 @@
 import logging
 import json
 import argparse
+import math
 from tqdm import tqdm
 
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from diffusers import DDPMScheduler
+from diffusers.optimization import get_scheduler
+
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
@@ -29,6 +32,7 @@ def main(args):
         args.batch_size,
         args.max_seq_length
     )
+    
     
     # scheduler
     noise_scheduler = DDPMScheduler(
@@ -58,10 +62,19 @@ def main(args):
         eps=1e-8
     )
     
+    num_update_steps_per_epoch = math.ceil(len(dataloader) / config["gradient_accumulation_steps"])
+    config["max_train_steps"] = config["num_train_epochs"] * num_update_steps_per_epoch
+    lr_scheduler = get_scheduler(
+        config["lr_scheduler"],
+        optimizer=optimizer,
+        num_warmup_steps=config["lr_warmup_steps"] * config["gradient_accumulation_steps"],
+        num_training_steps=config["max_train_steps"] * config["gradient_accumulation_steps"],
+    )
+    
     mse = nn.MSELoss()
     
-    dataloader, model, optimizer = accelerator.prepare(
-        dataloader, model, optimizer
+    dataloader, model, optimizer, lr_scheduler = accelerator.prepare(
+        dataloader, model, optimizer, lr_scheduler
     )
     
     
@@ -70,6 +83,8 @@ def main(args):
     for epoch in range(100):
         logging.info(f"Starting epoch {epoch}:")
         pbar = tqdm(dataloader, disable=not accelerator.is_local_main_process)
+        model.train()
+        train_loss = 0.0
         for batch in pbar:
             codes = batch["code"]
             text_seq_ids = batch["cmu_sequence_id"]
@@ -99,15 +114,24 @@ def main(args):
                 ).sample
                 loss = mse(noise, model_output)
                 
-                writer.add_scalar("Loss/train", loss, global_step)
+                # Gather the losses across all processes for logging (if we use distributed training).
+                avg_loss = accelerator.gather(loss.repeat(args.batch_size)).mean()
+                train_loss += avg_loss.item() / config["gradient_accumulation_steps"]
+                writer.add_scalar("Loss/train", train_loss, global_step)
                 
-                optimizer.zero_grad()
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
-                pbar.set_postfix(MSE=loss.item())
+                lr_scheduler.step()
+                optimizer.zero_grad()
+
+            # End step
+            pbar.set_postfix(MSE=train_loss)
             global_step += 1
+            train_loss = 0.0
+        
+        # End epoch    
         accelerator.wait_for_everyone()
         if accelerator.is_main_process and epoch % config["save_per_epochs"] == 0:
             unwrap_model = accelerator.unwrap_model(model)
@@ -115,7 +139,7 @@ def main(args):
             accelerator.save(optimizer.state_dict(), args.ckpt_dir + f"optim_{epoch+1}.pt")
             accelerator.save_state(output_dir=args.ckpt_dir)
     writer.flush()
-    writer.clos()
+    writer.close()
     
     
 def parse_args():
