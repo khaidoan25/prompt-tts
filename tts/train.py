@@ -109,11 +109,11 @@ def main(args):
                 pbar.set_postfix(MSE=loss.item())
             global_step += 1
         accelerator.wait_for_everyone()
-        if accelerator.is_main_process and (epoch + 1) % config["save_per_epochs"] == 0:
+        if accelerator.is_main_process and epoch % config["save_per_epochs"] == 0:
             unwrap_model = accelerator.unwrap_model(model)
-            accelerator.save(unwrap_model.state_dict(), config["ckpt_dir"] + f"/ckpt_{epoch+1}.pt")
-            accelerator.save(optimizer.state_dict(), config["ckpt_dir"] + f"/optim_{epoch+1}.pt")
-            accelerator.save_state(output_dir=config["ckpt_dir"])
+            accelerator.save(unwrap_model.state_dict(), args.ckpt_dir + f"ckpt_{epoch+1}.pt")
+            accelerator.save(optimizer.state_dict(), args.ckpt_dir + f"optim_{epoch+1}.pt")
+            accelerator.save_state(output_dir=args.ckpt_dir)
     writer.flush()
     writer.clos()
     
@@ -128,6 +128,8 @@ def parse_args():
                         help="Directory to save logs.", required=True)
     parser.add_argument('--config_file', type=str,
                         help="Path to config file.", required=True)
+    parser.add_argument('--ckpt_dir', type=str,
+                        help="Directory to save checkpoints.", required=True)
     parser.add_argument('--batch_size', type=int, default=32,
                         help="Batch size of Encodec encode.")
     parser.add_argument('--max_seq_length', type=int, default=550,
