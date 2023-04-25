@@ -1,6 +1,7 @@
 from diffusers.pipeline_utils import DiffusionPipeline, ImagePipelineOutput
 from diffusers import DDPMPipeline, DDPMScheduler
 from typing import Any, Dict, List, Optional, Tuple, Union
+import torch
 
 class Unet1DPipe(DDPMPipeline):
     def __init__(self, unet, scheduler):
