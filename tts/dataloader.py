@@ -1,17 +1,18 @@
 import torch
 from torch.utils.data import DataLoader, Dataset
-import webdataset as wds
+import torchvision
 import tarfile
 import numpy as np
 from io import BytesIO, TextIOWrapper
-from utils import get_cwd
-from process_text import text_to_sequence, cmudict, sequence_to_text
-from process_text.symbols import symbols
+
+from tts.utils import get_cwd
+from tts.process_text import text_to_sequence, cmudict, sequence_to_text
+from tts.process_text.symbols import symbols
 
 def intersperse(lst, item):
-  result = [item] * (len(lst) * 2 + 1)
-  result[1::2] = lst
-  return result
+    result = [item] * (len(lst) * 2 + 1)
+    result[1::2] = lst
+    return result
 
 
 class SingleSpeakerDataset(Dataset):
@@ -139,6 +140,7 @@ def _collate_batch_helpler(
 class TTS_SingleSpkr_Collate_Fn(object):
     def __init__(self, max_seq_length):
         self.max_seq_length = max_seq_length
+        self.normalization = torchvision.transforms.Normalize([0.5], [0.5])
         
     def __call__(self, batch):
         batch_code = []
@@ -163,7 +165,9 @@ class TTS_SingleSpkr_Collate_Fn(object):
             batch_text_norm = [item["text_norm"] for item in batch]
             
             return {
-                "code": torch.FloatTensor(np.array(batch_code)),
+                "code": self.normalization(
+                    torch.FloatTensor(np.array(batch_code))
+                ),
                 "text": batch_text,
                 "text_norm": batch_text_norm,
                 "code_length": batch_len,
@@ -173,7 +177,9 @@ class TTS_SingleSpkr_Collate_Fn(object):
             }
         else:
             return {
-                "code": torch.FloatTensor(np.array(batch_code)),
+                "code": self.normalization(
+                    torch.FloatTensor(np.array(batch_code))
+                ),
                 "text": batch_text,
                 "code_length": batch_len,
                 "cmu_sequence": batch_cmu,
@@ -182,11 +188,11 @@ class TTS_SingleSpkr_Collate_Fn(object):
             }
             
 
-def create_dataloader(data_file, batch_size, max_seq_length):
+def create_dataloader(data_file, batch_size, max_seq_length, shuffle=False):
     dataset = SingleSpeakerDataset(data_file)
     
     my_collate = TTS_SingleSpkr_Collate_Fn(max_seq_length)
     
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=my_collate)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=my_collate)
     
     return dataloader

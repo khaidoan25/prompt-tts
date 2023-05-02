@@ -1,9 +1,9 @@
 import torch
 from torch import nn
 
-from ldm.resnet import ResnetBlock1D
-from ldm.transformer_1d import Transformer1DModel
-from ldm.resnet import Downsample1D, Upsample1D
+from tts.ldm.resnet import ResnetBlock1D
+from tts.ldm.transformer_1d import Transformer1DModel
+from tts.ldm.resnet import Downsample1D, Upsample1D
 
 from diffusers.models.embeddings import Timesteps, TimestepEmbedding
 # from diffusers.models.resnet import Downsample1D, Upsample1D

@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from ldm.unet_blocks import (
+from tts.ldm.unet_blocks import (
     get_down_block,
     get_up_block,
     UNetMidBlock1DCrossAttn,

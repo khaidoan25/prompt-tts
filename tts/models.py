@@ -3,7 +3,7 @@ from torch import nn
 import numpy as np
 from typing import Union, Dict, Any, Optional
 
-from ldm.unet_1d_condition import Unet1DConditionModel
+from tts.ldm.unet_1d_condition import Unet1DConditionModel
 
 from diffusers.models.attention import BasicTransformerBlock
 
@@ -136,6 +136,7 @@ class TTSSingleSpeaker(nn.Module):
         )
         
         self.unet = Unet1DConditionModel(
+            sample_size=config["sample_size"],
             in_channels=config["in_channels"],
             out_channels=config["out_channels"],
             layers_per_block=config["layers_per_block"],
