@@ -10,14 +10,10 @@ from tts.ldm.unet_blocks import (
     UNetMidBlock1DCrossAttn,
     CrossAttnDownBlock1D,
     CrossAttnUpBlock1D,
-)
-
-from diffusers.models.unet_1d_blocks import (
-    DownBlock1DNoSkip,
     DownBlock1D,
-    UpBlock1DNoSkip,
     UpBlock1D
 )
+
 from diffusers.loaders import UNet2DConditionLoadersMixin
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.utils import BaseOutput, deprecate, logging
