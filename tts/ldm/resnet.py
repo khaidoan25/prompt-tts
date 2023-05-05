@@ -4,8 +4,96 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from diffusers.models.resnet import ResnetBlock2D, Downsample1D, Upsample1D
 from diffusers.models.embeddings import Timesteps, TimestepEmbedding
+
+
+
+class Upsample1D(nn.Module):
+    """
+    An upsampling layer with an optional convolution.
+
+    Parameters:
+            channels: channels in the inputs and outputs.
+            use_conv: a bool determining if a convolution is applied.
+            use_conv_transpose:
+            out_channels:
+    """
+
+    def __init__(self, channels, use_conv=False, use_conv_transpose=False, out_channels=None, name="conv"):
+        super().__init__()
+        self.channels = channels
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.use_conv_transpose = use_conv_transpose
+        self.name = name
+
+        self.conv = None
+        if use_conv_transpose:
+            self.conv = nn.ConvTranspose1d(channels, self.out_channels, 4, 2, 1)
+        elif use_conv:
+            self.conv = nn.Conv1d(self.channels, self.out_channels, 3, padding=1)
+
+    def forward(self, x, output_size=None):
+        assert x.shape[1] == self.channels
+        if self.use_conv_transpose:
+            return self.conv(x)
+
+        if output_size is None:
+            x = F.interpolate(x, scale_factor=2.0, mode="nearest")
+        else:
+            x = F.interpolate(x, size=output_size, mode="nearest")
+
+        if self.use_conv:
+            x = self.conv(x)
+
+        return x
+
+
+class Downsample1D(nn.Module):
+    """
+    A downsampling layer with an optional convolution.
+
+    Parameters:
+        channels: channels in the inputs and outputs.
+        use_conv: a bool determining if a convolution is applied.
+        out_channels:
+        padding:
+    """
+
+    def __init__(self, channels, use_conv=False, out_channels=None, padding=1, name="conv"):
+        super().__init__()
+        self.channels = channels
+        self.out_channels = out_channels or channels
+        self.use_conv = use_conv
+        self.padding = padding
+        stride = 2
+        self.name = name
+
+        if use_conv:
+            conv = nn.Conv1d(self.channels, self.out_channels, 3, stride=stride, padding=padding)
+        else:
+            assert self.channels == self.out_channels
+            conv = nn.AvgPool1d(kernel_size=stride, stride=stride)
+
+        # TODO(Suraj, Patrick) - clean up after weight dicts are correctly renamed
+        if name == "conv":
+            self.Conv1d_0 = conv
+            self.conv = conv
+        elif name == "Conv1d_0":
+            self.conv = conv
+        else:
+            self.conv = conv
+
+    def forward(self, hidden_states):
+        assert hidden_states.shape[1] == self.channels
+        if self.use_conv and self.padding == 0:
+            pad = (0, 1)
+            hidden_states = F.pad(hidden_states, pad, mode="constant", value=0)
+
+        assert hidden_states.shape[1] == self.channels
+        hidden_states = self.conv(hidden_states)
+
+        return hidden_states
 
 
 class ResnetBlock1D(nn.Module):
