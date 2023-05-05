@@ -6,13 +6,6 @@ from tts.ldm.transformer_1d import Transformer1DModel
 from tts.ldm.resnet import Downsample1D, Upsample1D
 
 from diffusers.models.embeddings import Timesteps, TimestepEmbedding
-# from diffusers.models.resnet import Downsample1D, Upsample1D
-# from diffusers.models.unet_1d_blocks import (
-#     DownBlock1DNoSkip,
-#     UpBlock1DNoSkip,
-#     DownBlock1D,
-#     UpBlock1D
-# )
 
 def get_down_block(
     down_block_type,
