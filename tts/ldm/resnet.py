@@ -4,7 +4,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from diffusers.models.resnet import ResnetBlock2D, Downsample1D
 from diffusers.models.embeddings import Timesteps, TimestepEmbedding
 
 
