@@ -38,20 +38,15 @@ class MyPipeline(DiffusionPipeline):
             # model_input = self.scheduler.scale_model_input(model_input, t)
             
             # 1. predict noise model_output
-            # noise_pred = self.unet(
-            #     sample=model_input,
-            #     timestep=t,
-            #     encoder_hidden_states=encoder_hidden_states
-            # ).sample
+            noise_pred = self.unet(
+                sample=model_input,
+                timestep=t,
+                encoder_hidden_states=encoder_hidden_states
+            ).sample
 
             # 2. predict previous mean of image x_t-1 and add variance depending on eta
             # eta corresponds to η in paper and should be between [0, 1]
             # do x_t -> x_t-1
-            codes = self.scheduler.step(noise, t, codes).prev_sample
-
-        # x_0 = codes
-        # codes = (codes / 2 + 0.5).clamp(0, 1)
-        # codes = codes.cpu().numpy()
-        # codes = (codes * 1023).round().astype('int')
+            codes = self.scheduler.step(noise_pred, t, codes).prev_sample
 
         return codes

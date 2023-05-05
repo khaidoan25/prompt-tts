@@ -7,7 +7,7 @@ import torch
 from diffusers import DDPMScheduler
 
 from tts.models import TTSSingleSpeaker
-from tts.utils import get_cwd
+from tts.utils import get_cwd, transform_to_code
 from tts.process_text import text_to_sequence, cmudict, sequence_to_text
 from tts.process_text.symbols import symbols
 from tts.dataloader import intersperse
@@ -50,9 +50,9 @@ def main(args):
     
     decode_pipeline = MyPipeline(unet=unet, scheduler=noise_scheduler)
     
-    codes = decode_pipeline(text_emb, num_inference_steps=args.decode_step)
+    normalized_codes = decode_pipeline(text_emb, num_inference_steps=args.decode_step)
     
-    np.save("test.npy", codes[0])
+    codes = transform_to_code(normalized_codes)
     
     return codes
 
@@ -61,10 +61,6 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description="Train TTS models."
                                      "The data is stored in WebDataset format.")
-    # parser.add_argument('--data_file', type=str, default=None,
-    #                     help="Path to the training data file.", required=True)
-    # parser.add_argument('--log_dir', type=str,
-    #                     help="Directory to save logs.", required=True)
     parser.add_argument('--text', type=str,
                         help="Text sample to run TTS", required=True)
     parser.add_argument('--config_file', type=str,
