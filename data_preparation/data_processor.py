@@ -23,11 +23,12 @@ def create_batch(members, tf, batch_size, max_duration):
     for member in members:
         if ".wav" not in member.name:
             continue
-        batch[1].append(member.name)
         wav, sr = torchaudio.load(tf.extractfile(member))
         if wav.shape[0] == 2:
             wav = wav[:1]
         wav = convert_audio(wav, sr, model.sample_rate, model.channels)
+        if wav.shape[-1] > 24000 * max_duration:
+            continue
         # Pad the wavfile to 20s duration
         batch[2].append(np.ceil(wav.shape[1] / 320))
         wav = torch.cat(
@@ -36,6 +37,7 @@ def create_batch(members, tf, batch_size, max_duration):
         )
         wav = wav.unsqueeze(0)
         batch[0].append(wav)
+        batch[1].append(member.name)
         if index % batch_size == 0:
             yield batch
             batch = [[], [], []]
@@ -92,12 +94,12 @@ class LibriTTSProcessor():
                 text = orig_tf.extractfile(orig_trans).read()
                 text_norm = orig_tf.extractfile(norm_trans).read()
                 
-                string = BytesIO(bytes(text, "utf-8"))
+                string = BytesIO(text)
                 tarinfo = tarfile.TarInfo(orig_trans.split('/')[-1])
                 tarinfo.size = len(text)
                 new_tf.addfile(tarinfo, string)
                 
-                string_norm = BytesIO(bytes(text_norm, "utf-8"))
+                string_norm = BytesIO(text_norm)
                 tarinfo_norm = tarfile.TarInfo(norm_trans.split('/')[-1])
                 tarinfo_norm.size = len(text_norm)
                 new_tf.addfile(tarinfo_norm, string_norm)
@@ -106,7 +108,10 @@ class LibriTTSProcessor():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_file", required=True)
+    parser.add_argument("--max_duration", default=20)
     args = parser.parse_args()
     
-    data_processor = LibriTTSProcessor(args.input_file)
-    data_processor.standardize()
+    data_processor = LibriTTSProcessor(
+        args.input_file,
+    )
+    data_processor.standardize(max_duration=args.max_duration,)
