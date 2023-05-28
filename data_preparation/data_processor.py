@@ -23,14 +23,16 @@ def create_batch(members, tf, batch_size, max_duration, ignore_file):
     index = 1
     batch = [[], [], []]    # wav, name, codec_length
     for member in members:
-        if ".wav" not in member.name and member.name not in ignore_list:
+        if ".wav" not in member.name:
+            continue
+        if member.name.split('/')[-1] in ignore_list:
             continue
         wav, sr = torchaudio.load(tf.extractfile(member))
         if wav.shape[0] == 2:
             wav = wav[:1]
         wav = convert_audio(wav, sr, model.sample_rate, model.channels)
         with open(ignore_file, "a") as f:
-            f.write(member.name + '\n')
+            f.write(member.name.split('/')[-1] + '\n')
         if wav.shape[-1] > model.sample_rate * max_duration:
             continue
         # Pad the wavfile to 20s duration
