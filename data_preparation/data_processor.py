@@ -17,17 +17,21 @@ model.set_target_bandwidth(6.0)
 model.to(device)
 
 
-def create_batch(members, tf, batch_size, max_duration):
+def create_batch(members, tf, batch_size, max_duration, ignore_file):
+    with open(ignore_file, "r") as f:
+        ignore_list = set(f.read().split('\n')[:-1])
     index = 1
     batch = [[], [], []]    # wav, name, codec_length
     for member in members:
-        if ".wav" not in member.name:
+        if ".wav" not in member.name and member.name not in ignore_list:
             continue
         wav, sr = torchaudio.load(tf.extractfile(member))
         if wav.shape[0] == 2:
             wav = wav[:1]
         wav = convert_audio(wav, sr, model.sample_rate, model.channels)
-        if wav.shape[-1] > 24000 * max_duration:
+        with open(ignore_file, "a") as f:
+            f.write(member.name + '\n')
+        if wav.shape[-1] > model.sample_rate * max_duration:
             continue
         # Pad the wavfile to 20s duration
         batch[2].append(np.ceil(wav.shape[1] / 320))
@@ -38,11 +42,11 @@ def create_batch(members, tf, batch_size, max_duration):
         wav = wav.unsqueeze(0)
         batch[0].append(wav)
         batch[1].append(member.name)
-        if index % batch_size == 0:
+        if index % batch_size == 0 and len(batch[0]) != 0:
             yield batch
             batch = [[], [], []]
         index += 1
-    if len(batch) != 0:
+    if len(batch[0]) != 0:
         yield batch
 
 
@@ -62,6 +66,7 @@ class LibriTTSProcessor():
         
     def standardize(
         self,
+        ignore_file,
         batch_size=8,
         max_duration=12
         ):
@@ -71,7 +76,14 @@ class LibriTTSProcessor():
         
         new_tf = tarfile.open(self.data_path.replace(".gz", ""), "w")
         
-        for batch in tqdm(create_batch(members, orig_tf, batch_size, max_duration)):
+        batch_generator = create_batch(
+            members, 
+            orig_tf, 
+            batch_size, 
+            max_duration,
+            ignore_file
+        )
+        for batch in tqdm(batch_generator):
             codes = generate(batch[0])
 
             for i, code in enumerate(codes):
@@ -108,10 +120,16 @@ class LibriTTSProcessor():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_file", required=True)
+    parser.add_argument("--ignore_file", required=True)
     parser.add_argument("--max_duration", default=20)
+    parser.add_argument("--batch_size", default=16)
     args = parser.parse_args()
     
     data_processor = LibriTTSProcessor(
         args.input_file,
     )
-    data_processor.standardize(max_duration=args.max_duration,)
+    data_processor.standardize(
+        args.ignore_file,
+        max_duration=args.max_duration,
+        batch_size=args.batch_size,
+    )
