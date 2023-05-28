@@ -9,6 +9,7 @@ import numpy as np
 from os.path import abspath
 from tqdm import tqdm
 from io import BytesIO
+import os
 
 
 device = "cuda" if torch.cuda.is_available else "cpu"
@@ -72,11 +73,14 @@ class LibriTTSProcessor():
         batch_size=8,
         max_duration=12
         ):
+        print("Reading tarfile ...")
         orig_tf = tarfile.open(self.data_path, "r:gz")
         members = orig_tf.getmembers()
-        print("Reading tarfile ...")
         
-        new_tf = tarfile.open(self.data_path.replace(".gz", ""), "w")
+        if os.path.exists(self.data_path.replace(".gz", "")):
+            new_tf = tarfile.open(self.data_path.replace(".gz", ""), "a")
+        else:
+            new_tf = tarfile.open(self.data_path.replace(".gz", ""), "w")
         
         batch_generator = create_batch(
             members, 
