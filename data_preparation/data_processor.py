@@ -21,7 +21,6 @@ model.to(device)
 def create_batch(members, tf, batch_size, max_duration, ignore_file):
     with open(ignore_file, "r") as f:
         ignore_list = set(f.read().split('\n')[:-1])
-    index = 1
     batch = [[], [], []]    # wav, name, codec_length
     for member in members:
         if ".wav" not in member.name:
@@ -45,10 +44,9 @@ def create_batch(members, tf, batch_size, max_duration, ignore_file):
         wav = wav.unsqueeze(0)
         batch[0].append(wav)
         batch[1].append(member.name)
-        if index % batch_size == 0 and len(batch[0]) != 0:
+        if len(batch[0]) % batch_size == 0 and len(batch[0]) != 0:
             yield batch
             batch = [[], [], []]
-        index += 1
     if len(batch[0]) != 0:
         yield batch
 
@@ -77,11 +75,6 @@ class LibriTTSProcessor():
         orig_tf = tarfile.open(self.data_path, "r:gz")
         members = orig_tf.getmembers()
         
-        if os.path.exists(self.data_path.replace(".gz", "")):
-            new_tf = tarfile.open(self.data_path.replace(".gz", ""), "a")
-        else:
-            new_tf = tarfile.open(self.data_path.replace(".gz", ""), "w")
-        
         batch_generator = create_batch(
             members, 
             orig_tf, 
@@ -89,38 +82,59 @@ class LibriTTSProcessor():
             max_duration,
             ignore_file
         )
+        
+        if os.path.exists(self.data_path.replace(".gz", "")):
+            open_type = "a"
+        else:
+            open_type = "w"
+            
+        error_file = []
         for batch in tqdm(batch_generator):
-            codes = generate(batch[0])
+            try:
+                codes = generate(batch[0])
 
-            for i, code in enumerate(codes):
-                with TemporaryDirectory() as dirname:
-                    # save code
-                    np_file = batch[1][i].replace(".wav", ".npy").split('/')[-1]
-                    np.save(abspath(f"{dirname}/{np_file}"), code)
-                    new_tf.add(abspath(f"{dirname}/{np_file}"), arcname=np_file)
+                for i, code in enumerate(codes):
+                    orig_trans = batch[1][i].replace(".wav", ".original.txt")
+                    norm_trans = batch[1][i].replace(".wav", ".normalized.txt")
                     
-                    # save length
-                    len_file = np_file.replace(".npy", ".len.txt")
-                    with open(abspath(f"{dirname}/{len_file}"), "w") as f:
-                        f.write(str(batch[2][i]))
-                    new_tf.add(abspath(f"{dirname}/{len_file}"), arcname=len_file)
+                    text = orig_tf.extractfile(orig_trans).read()
+                    text_norm = orig_tf.extractfile(norm_trans).read()
                     
-                # copy transcript
-                orig_trans = batch[1][i].replace(".wav", ".original.txt")
-                norm_trans = batch[1][i].replace(".wav", ".normalized.txt")
+                    string = BytesIO(text)
+                    tarinfo = tarfile.TarInfo(orig_trans.split('/')[-1])
+                    tarinfo.size = len(text)
+                    
+                    string_norm = BytesIO(text_norm)
+                    tarinfo_norm = tarfile.TarInfo(norm_trans.split('/')[-1])
+                    tarinfo_norm.size = len(text_norm)
+                    
+                    with TemporaryDirectory() as dirname:
+                        len_file = np_file.replace(".npy", ".len.txt")
+                        with open(abspath(f"{dirname}/{len_file}"), "w") as f:
+                            f.write(str(batch[2][i]))
+                            
+                        np_file = batch[1][i].replace(".wav", ".npy").split('/')[-1]
+                        np.save(abspath(f"{dirname}/{np_file}"), code)
+                        
+                        with tarfile.open(self.data_path.replace(".gz", ""), open_type) as new_tf:
+                            # save code
+                            new_tf.add(abspath(f"{dirname}/{np_file}"), arcname=np_file)
+                            
+                            # save length
+                            new_tf.add(abspath(f"{dirname}/{len_file}"), arcname=len_file)
+                            
+                            # copy transcript
+                            new_tf.addfile(tarinfo, string)
+                            new_tf.addfile(tarinfo_norm, string_norm)                    
+            except:
+                error_file += batch[1]
+                continue
                 
-                text = orig_tf.extractfile(orig_trans).read()
-                text_norm = orig_tf.extractfile(norm_trans).read()
-                
-                string = BytesIO(text)
-                tarinfo = tarfile.TarInfo(orig_trans.split('/')[-1])
-                tarinfo.size = len(text)
-                new_tf.addfile(tarinfo, string)
-                
-                string_norm = BytesIO(text_norm)
-                tarinfo_norm = tarfile.TarInfo(norm_trans.split('/')[-1])
-                tarinfo_norm.size = len(text_norm)
-                new_tf.addfile(tarinfo_norm, string_norm)
+        orig_tf.close()
+        # new_tf.close()
+        with open("dev_error.txt", "w") as f:
+            for file_name in error_file:
+                f.write(file_name + '\n')
                 
                 
 if __name__ == "__main__":
@@ -128,7 +142,7 @@ if __name__ == "__main__":
     parser.add_argument("--input_file", required=True)
     parser.add_argument("--ignore_file", required=True)
     parser.add_argument("--max_duration", default=20)
-    parser.add_argument("--batch_size", default=16)
+    parser.add_argument("--batch_size", default=16, type=int)
     args = parser.parse_args()
     
     data_processor = LibriTTSProcessor(
