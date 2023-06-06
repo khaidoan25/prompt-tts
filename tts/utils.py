@@ -1,8 +1,10 @@
 import os
-
+import numpy as np
 from collections import OrderedDict
 from dataclasses import fields
 from typing import Any, Tuple
+
+import torch
 
 
 def get_cwd():
@@ -81,3 +83,11 @@ class BaseOutput(OrderedDict):
         Convert self to a tuple containing all the attributes/keys that are not `None`.
         """
         return tuple(self[k] for k in self.keys())
+    
+    
+def transform_to_code(normalized_code: torch.Tensor) -> np.ndarray:
+    codes = (normalized_code / 2 + 0.5).clamp(0, 1)
+    codes = codes.cpu().numpy()
+    codes = (codes * 1023).round().astype('int')
+    
+    return codes
