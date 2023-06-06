@@ -124,7 +124,7 @@ class MultiSpeakerDataset(Dataset):
             codec_code = np.load(array_file)
             
             text = TextIOWrapper(
-                    tf.extractfile(codec_file.replace(".npy", ".txt"))
+                    tf.extractfile(codec_file.replace(".npy", ".original.txt"))
                 ).read()
             
             if codec_file.replace(".npy", ".normalized.txt") not in txt_file:
@@ -134,6 +134,8 @@ class MultiSpeakerDataset(Dataset):
                     tf.extractfile(codec_file.replace(".npy", ".normalized.txt"))
                 ).read()
             
+            if len(text_norm) == 0:
+                continue
             cmu_sequence = intersperse(
                 text_to_sequence(text_norm, ["english_cleaners"], cmu_dict),
                 len(symbols)
@@ -200,13 +202,13 @@ class MultiSpeakerDataset(Dataset):
         else:
             sample = random.sample(sample_list, k=1)[0]
             
-        crop_idx = np.ceil(sample.shape[-1] * 320 / self.sample_rate)
+        crop_idx = int(np.ceil(sample.shape[-1] * 320 / self.sample_rate))
         rand_idx = random.sample(range(crop_idx), k=1)[0]
         if rand_idx == crop_idx:
-            sample = sample[:, -3 * self.sample_rate / 320:]
+            sample = sample[:, -int(3 * self.sample_rate / 320):]
         else:
-            beg_idx = rand_idx * self.sample_rate / 320
-            end_idx = (rand_idx + 1) * self.sample_rate / 320
+            beg_idx = rand_idx * int(self.sample_rate / 320)
+            end_idx = (rand_idx + 1) * int(self.sample_rate / 320)
             sample = sample[:, beg_idx:end_idx]
         
         return sample
@@ -370,10 +372,19 @@ class TTS_MultiSpkr_Collate_Fn(object):
             }
             
 
-def create_dataloader(data_file, batch_size, max_seq_length, shuffle=False):
-    dataset = SingleSpeakerDataset(data_file)
+def create_dataloader(
+    data_file,
+    batch_size,
+    max_seq_length,
+    data_type,
+    shuffle=False):
     
-    my_collate = TTS_SingleSpkr_Collate_Fn(max_seq_length)
+    if data_type == "single_speaker":
+        dataset = SingleSpeakerDataset(data_file)
+        my_collate = TTS_SingleSpkr_Collate_Fn(max_seq_length)
+    elif data_type == "multi_speaker":
+        dataset = MultiSpeakerDataset(data_file)
+        my_collate = TTS_MultiSpkr_Collate_Fn(max_seq_length)
     
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=my_collate)
     
