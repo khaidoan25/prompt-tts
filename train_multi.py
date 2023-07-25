@@ -12,11 +12,71 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from tts.models import TTSSingleSpeaker
-from tts.dataloader import create_dataloader
+from tts.models import TTSMultiSpeaker
+from tts.dataloader.dataloader import create_dataloader
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
 
+
+def test_main(args):
+    config = json.load(open(args.config_file, "r"))
+    
+    model = TTSMultiSpeaker(config)
+    
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=config["gradient_accumulation_steps"],
+        kwargs_handlers=[ddp_kwargs]
+    )
+    
+    # data
+    dataloader = create_dataloader(
+        args.data_files,
+        args.batch_size,
+        args.max_seq_length,
+        data_type="multi_speaker",
+        shuffle=True
+    )
+    
+    num_update_steps_per_epoch = math.ceil(len(dataloader) / config["gradient_accumulation_steps"])
+    max_train_steps = config["num_train_epochs"] * num_update_steps_per_epoch
+    
+    # optimizer
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=1e-5,
+        betas=(0.95, 0.999),
+        weight_decay=1e-6,
+        eps=1e-8
+    )
+        
+    lr_scheduler = get_scheduler(
+        config["lr_scheduler"],
+        optimizer=optimizer,
+        num_warmup_steps=config["lr_warmup_steps"] * config["gradient_accumulation_steps"],
+        num_training_steps=max_train_steps * config["gradient_accumulation_steps"],
+    )
+    
+    dataloader, model, optimizer, lr_scheduler = accelerator.prepare(
+        dataloader, model, optimizer, lr_scheduler
+    )
+    
+    for epoch in range(config["num_train_epochs"]):
+        epoch += args.prev_epoch
+        logging.info(f"Starting epoch {epoch}:")
+        pbar = tqdm(dataloader, disable=not accelerator.is_local_main_process)
+        
+        for batch in pbar:
+            with accelerator.accumulate(model):
+                print("a")
+        # End epoch
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            print("This is main_process")
+            print(epoch)
+            print((epoch + 1) % config["save_per_epochs"])
+            if (epoch + 1) % config["save_per_epochs"] == 0:
+                print("Save model epoch")
 
 def main(args):
     writer = SummaryWriter(log_dir=args.log_dir)
@@ -35,7 +95,7 @@ def main(args):
         prediction_type="epsilon"
     )
     
-    model = TTSSingleSpeaker(config)
+    model = TTSMultiSpeaker(config)
         
     # optimizer
     optimizer = torch.optim.AdamW(
@@ -48,9 +108,10 @@ def main(args):
     
     # data
     dataloader = create_dataloader(
-        args.data_file,
+        args.data_files,
         args.batch_size,
         args.max_seq_length,
+        data_type="multi_speaker",
         shuffle=True
     )
     
@@ -68,9 +129,19 @@ def main(args):
         dataloader, model, optimizer, lr_scheduler
     )
     
+    if args.model_ckpt is not None and args.optim_ckpt is not None:
+        # model.load_state_dict(
+        #     torch.load(args.model_ckpt, map_location=accelerator.device)
+        # )
+        # optimizer.load_state_dict(
+        #     torch.load(args.optim_ckpt, map_location=accelerator.device)
+        # )
+        accelerator.load_state(args.ckpt_dir)
+    
     # training loop
     global_step = 0
     for epoch in range(config["num_train_epochs"]):
+        epoch += args.prev_epoch
         logging.info(f"Starting epoch {epoch}:")
         pbar = tqdm(dataloader, disable=not accelerator.is_local_main_process)
         model.train()
@@ -79,8 +150,8 @@ def main(args):
         for batch in pbar:
             with accelerator.accumulate(model):
                 codes = batch["code"]
-                text_seq_ids = batch["cmu_sequence_id"]
-                attention_mask = batch["attention_mask"]
+                text_seq_ids = batch["cmu_sequence"]
+                spk_code = batch["sample"]
                 
                 # Sample noise
                 noise = torch.randn_like(codes).to(accelerator.device)
@@ -101,7 +172,7 @@ def main(args):
                     noisy_codes,
                     timesteps,
                     text_seq_ids,
-                    attention_mask,
+                    spk_code
                 ).sample
                 
                 loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
@@ -122,27 +193,18 @@ def main(args):
             # End step
             pbar.set_postfix(MSE=train_loss)
             global_step += 1
-            train_loss = 0.0
-        
-        # Save for debugging
-        # torch.save(noise[:1], "noise.pt")
-        # torch.save(codes[:1], "x_0.pt")
-        # torch.save(text_seq_ids[:1], "text_seq_ids.pt")
-        # torch.save(attention_mask[:1], "attn_mask.pt")
-        # torch.save(timesteps[:1], "timesteps.pt")
-        # torch.save(noisy_codes[:1], "x_t.pt")
-        # with open("same_test.txt", "w") as f:
-        #     f.write(batch["text"][0])
-        
+            train_loss = 0.0        
         
         # End epoch
         accelerator.wait_for_everyone()
-        if accelerator.is_main_process and epoch % config["save_per_epochs"] == 0:
+        if accelerator.is_main_process:
             unwrap_model = accelerator.unwrap_model(model)
-            accelerator.save(unwrap_model.state_dict(), args.ckpt_dir + f"ckpt_{epoch+1}.pt")
-            accelerator.save(optimizer.state_dict(), args.ckpt_dir + f"optim_{epoch+1}.pt")
             accelerator.save_state(output_dir=args.ckpt_dir)
-    accelerator.end_training()
+            if (epoch + 1) % config["save_per_epochs"] == 0:
+                accelerator.save(unwrap_model.state_dict(), args.ckpt_dir + f"ckpt_{epoch+1}.pt")
+                accelerator.save(optimizer.state_dict(), args.ckpt_dir + f"optim_{epoch+1}.pt")
+                # accelerator.save_state(output_dir=args.ckpt_dir)
+            
     writer.flush()
     writer.close()
     
@@ -151,8 +213,10 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description="Train TTS models."
                                      "The data is stored in WebDataset format.")
-    parser.add_argument('--data_file', type=str, default=None,
-                        help="Path to the training data file.", required=True)
+    parser.add_argument('--data_files', type=str, default=None,
+                        help="Path to the training data files. Separate by ','.\
+                            data_file1,data_file2",
+                        required=True)
     parser.add_argument('--log_dir', type=str,
                         help="Directory to save logs.", required=True)
     parser.add_argument('--config_file', type=str,
@@ -163,6 +227,12 @@ def parse_args():
                         help="Batch size of Encodec encode.")
     parser.add_argument('--max_seq_length', type=int, default=550,
                         help="Maximum length of cmu sequence.")
+    parser.add_argument('--model_ckpt', type=str, default=None,
+                        help="Path to the previous model checkpoint.")
+    parser.add_argument('--optim_ckpt', type=str, default=None,
+                        help="Path to the previous optimizer checkpoint.")
+    parser.add_argument('--prev_epoch', type=int, default=0,
+                        help="Num trained epoch.")
 
 
     return parser.parse_args()

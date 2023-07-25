@@ -3,16 +3,18 @@ from diffusers import DiffusionPipeline
 
 
 class MyPipeline(DiffusionPipeline):
-    def __init__(self, unet, scheduler):
+    def __init__(self, unet, scheduler, in_channels, sample_size):
         super().__init__()
 
         self.register_modules(unet=unet, scheduler=scheduler)
+        self.in_channels = in_channels
+        self.sample_size = sample_size
 
     @torch.no_grad()
     def __call__(
         self,
         encoder_hidden_states,
-        noise=None,
+        attention_mask=None,
         codes=None,
         batch_size: int = 1,
         num_inference_steps: int = 50):
@@ -22,8 +24,8 @@ class MyPipeline(DiffusionPipeline):
             codes = torch.randn(
                 (
                     batch_size,
-                    self.unet.config.in_channels,
-                    self.unet.config.sample_size
+                    self.in_channels,
+                    self.sample_size
                 )
             )
 
@@ -41,7 +43,8 @@ class MyPipeline(DiffusionPipeline):
             noise_pred = self.unet(
                 sample=model_input,
                 timestep=t,
-                encoder_hidden_states=encoder_hidden_states
+                encoder_hidden_states=encoder_hidden_states,
+                attention_mask=attention_mask
             ).sample
 
             # 2. predict previous mean of image x_t-1 and add variance depending on eta

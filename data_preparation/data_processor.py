@@ -18,9 +18,7 @@ model.set_target_bandwidth(6.0)
 model.to(device)
 
 
-def create_batch(members, tf, batch_size, max_duration, ignore_file):
-    with open(ignore_file, "r") as f:
-        ignore_list = set(f.read().split('\n')[:-1])
+def create_batch(members, tf, batch_size, max_duration, ignore_list):            
     batch = [[], [], []]    # wav, name, codec_length
     for member in members:
         if ".wav" not in member.name:
@@ -31,9 +29,9 @@ def create_batch(members, tf, batch_size, max_duration, ignore_file):
         if wav.shape[0] == 2:
             wav = wav[:1]
         wav = convert_audio(wav, sr, model.sample_rate, model.channels)
-        with open(ignore_file, "a") as f:
-            f.write(member.name.split('/')[-1] + '\n')
         if wav.shape[-1] > model.sample_rate * max_duration:
+            print("Exceed max duration")
+            print(member.name)
             continue
         # Pad the wavfile to 20s duration
         batch[2].append(np.ceil(wav.shape[1] / 320))
@@ -71,8 +69,16 @@ class LibriTTSProcessor():
         batch_size=8,
         max_duration=12
         ):
+        
+        if os.path.exists(ignore_file):
+            with open(ignore_file, "r") as f:
+                ignore_list = set(f.read().split('\n')[:-1])
+        else:
+            with open(ignore_file, "w") as f:
+                ignore_list = set([])
+        
         print("Reading tarfile ...")
-        orig_tf = tarfile.open(self.data_path, "r:gz")
+        orig_tf = tarfile.open(self.data_path, "r")
         members = orig_tf.getmembers()
         
         batch_generator = create_batch(
@@ -80,61 +86,51 @@ class LibriTTSProcessor():
             orig_tf, 
             batch_size, 
             max_duration,
-            ignore_file
+            ignore_list
         )
         
-        if os.path.exists(self.data_path.replace(".gz", "")):
-            open_type = "a"
-        else:
-            open_type = "w"
-            
-        error_file = []
         for batch in tqdm(batch_generator):
-            try:
-                codes = generate(batch[0])
-
-                for i, code in enumerate(codes):
-                    orig_trans = batch[1][i].replace(".wav", ".original.txt")
-                    norm_trans = batch[1][i].replace(".wav", ".normalized.txt")
-                    
-                    text = orig_tf.extractfile(orig_trans).read()
-                    text_norm = orig_tf.extractfile(norm_trans).read()
-                    
-                    string = BytesIO(text)
-                    tarinfo = tarfile.TarInfo(orig_trans.split('/')[-1])
-                    tarinfo.size = len(text)
-                    
-                    string_norm = BytesIO(text_norm)
-                    tarinfo_norm = tarfile.TarInfo(norm_trans.split('/')[-1])
-                    tarinfo_norm.size = len(text_norm)
+            if os.path.exists(self.data_path.replace(".tar", "_processed.tar")):
+                open_type = "a"
+            else:
+                open_type = "w"
+            
+            codes = generate(batch[0])
+            for i, code in enumerate(codes):
+                try:
+                    text_filename = batch[1][i].replace(".wav", ".original.txt")
+                    text_file = orig_tf.getmember(text_filename)
+                    text_norm_filename = batch[1][i].replace(".wav", ".normalized.txt")
+                    text_norm_file = orig_tf.getmember(text_norm_filename)
                     
                     with TemporaryDirectory() as dirname:
+                        np_file = batch[1][i].replace(".wav", ".npy").split('/')[-1]
+                        np.save(abspath(f"{dirname}/{np_file}"), code)
+                            
                         len_file = np_file.replace(".npy", ".len.txt")
                         with open(abspath(f"{dirname}/{len_file}"), "w") as f:
                             f.write(str(batch[2][i]))
                             
-                        np_file = batch[1][i].replace(".wav", ".npy").split('/')[-1]
-                        np.save(abspath(f"{dirname}/{np_file}"), code)
-                        
-                        with tarfile.open(self.data_path.replace(".gz", ""), open_type) as new_tf:
-                            # save code
-                            new_tf.add(abspath(f"{dirname}/{np_file}"), arcname=np_file)
-                            
-                            # save length
-                            new_tf.add(abspath(f"{dirname}/{len_file}"), arcname=len_file)
-                            
-                            # copy transcript
-                            new_tf.addfile(tarinfo, string)
-                            new_tf.addfile(tarinfo_norm, string_norm)                    
-            except:
-                error_file += batch[1]
-                continue
+                        with tarfile.open(self.data_path.replace(".tar", "_processed.tar"), open_type) as new_tf:
+                            new_tf.add(
+                                abspath(f"{dirname}/{np_file}"),
+                                arcname=batch[1][i].replace(".wav", ".npy")
+                            )
+                            new_tf.add(
+                                abspath(f"{dirname}/{len_file}"),
+                                arcname=batch[1][i].replace(".wav", ".len.txt")
+                            )
+                            new_tf.addfile(text_file)
+                            new_tf.addfile(text_norm_file)
+                        with open(ignore_file, "a") as f:
+                            f.write(batch[1][i].split('/')[-1] + '\n')
+                except:
+                    print("Error occurs")
+                    print(batch[1][i])
+                    with open(ignore_file, "a") as f:
+                        f.write(batch[1][i].split('/')[-1] + '\n')
                 
         orig_tf.close()
-        # new_tf.close()
-        with open("dev_error.txt", "w") as f:
-            for file_name in error_file:
-                f.write(file_name + '\n')
                 
                 
 if __name__ == "__main__":
