@@ -8,7 +8,10 @@ from torch import einsum, nn
 from torch.nn.utils.rnn import pad_sequence
 
 from tts.ldm.unet_1d_condition import Unet1DConditionModel
-from tts.model.modules import TextEncoder, TextEmbedding, SpeakerEncoder
+from tts.model.modules import (
+    TextEncoder, TextEmbedding,
+    SpeakerEncoder, DurationPredictor
+)
     
     
 class TTSSingleSpeaker(nn.Module):
@@ -81,7 +84,7 @@ def list_to_tensor(x_list: List[torch.Tensor], pattern="n b d -> b n d"):
     l = list(map(len, x_list))
     x = rearrange(pad_sequence(x_list), pattern)
     m = _create_mask(l, x_list[0].device)
-    m = m.t().unsqueeze(-1)  # (t b 1)
+    m = m.t().unsqueeze(-1)  # (n b 1)
     m = rearrange(m, pattern)
     m = m.to(x)
     return x, m
@@ -116,7 +119,13 @@ class TTSMultiSpeaker(nn.Module):
             config["cmu_vocab_len"],
             config["cross_attention_dim"]
         )
-                # self.spk_encoder = nn
+        
+        self.duration_predictor = DurationPredictor(
+            in_channels=config["cross_attention_dim"],
+            out_channels=config["out_channels_dp"],
+            kernel_size=config["kernel_size"],
+            p_dropout=config["p_dropout"]
+        )
 
         self.unet = Unet1DConditionModel(
             sample_size=config["sample_size"],
@@ -135,7 +144,6 @@ class TTSMultiSpeaker(nn.Module):
             1024,
             config["cross_attention_dim"]
         )
-        self.training = training
         
     def forward(
         self,
@@ -143,11 +151,65 @@ class TTSMultiSpeaker(nn.Module):
         timestep: Union[torch.Tensor, float, int],
         text_seq_ids: List[torch.Tensor],
         spk_code: List[torch.Tensor],
-        attention_mask: Optional[torch.Tensor]=None,
         cross_attention_kwargs: Optional[Dict[str, Any]]=None,
         return_dict: bool=True,
     ):
-        text_emb_list = self.text_encoder(text_seq_ids)
+        text_emb_list = self.text_encoder(text_seq_ids) # list of [l, d]
+        
+        x_dp, m_dp = list_to_tensor(text_emb_list) # [b, l, d], [b, l, 1]
+        x_dp = torch.transpose(x_dp, 1, -1)
+        x_dp = torch.detach(x_dp)
+        m_dp = torch.transpose(m_dp, 1, -1)
+        
+        #TODO:
+        # 1. Finish the flow with duration predictor (in review)
+        # 2. Define a function to predict duration (in review)
+        # 3. Define a cuntion to get encoder hidden states (in review)
+        dp_output = self.duration_predictor(x_dp, m_dp)
+        
+        for i in range(len(spk_code)):
+            spk_code[i] = rearrange(spk_code[i], "l n -> n l")
+        spk_emb_list = self.spk_encoder(spk_code)
+
+        input_list = _samplewise_merge_tensors(text_emb_list, spk_emb_list)
+        
+        x, m = list_to_tensor(input_list)
+        
+        unet_output = self.unet(
+            sample=sample,
+            timestep=timestep,
+            encoder_hidden_states=x,
+            attention_mask=m,
+            cross_attention_kwargs=cross_attention_kwargs,
+            return_dict=return_dict
+        )
+        
+        return unet_output, dp_output
+    
+    def predict_duration(
+        self,
+        text_seq_ids: List[torch.Tensor]
+    ):
+        text_emb_list = self.text_encoder(text_seq_ids) # list of [l, d]
+        
+        x_dp, m_dp = list_to_tensor(text_emb_list) # [b, l, d], [b, l, 1]
+        x_dp = torch.transpose(x_dp, 1, -1)
+        x_dp = torch.detach(x_dp)
+        m_dp = torch.transpose(m_dp, 1, -1)
+        
+        dp_output = self.duration_predictor(x_dp, m_dp)
+        return dp_output
+    
+    def predict_unet(
+        self,
+        sample: torch.FloatTensor,
+        timestep: Union[torch.Tensor, float, int],
+        text_seq_ids: List[torch.Tensor],
+        spk_code: List[torch.Tensor],
+        cross_attention_kwargs: Optional[Dict[str, Any]]=None,
+        return_dict: bool=True
+    ):
+        text_emb_list = self.text_encoder(text_seq_ids) # list of [l, d]
         
         for i in range(len(spk_code)):
             spk_code[i] = rearrange(spk_code[i], "l n -> n l")
