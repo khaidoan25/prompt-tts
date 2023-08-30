@@ -1,10 +1,12 @@
-import torch
-from torch.utils.data import DataLoader, Dataset
-import torchvision
+import pathlib
 import tarfile
 import random
 import numpy as np
 from io import BytesIO, TextIOWrapper
+
+import torch
+from torch.utils.data import DataLoader, Dataset
+import torchvision
 
 from tts.utils import get_cwd
 from tts.process_text import text_to_sequence, cmudict, sequence_to_text
@@ -25,18 +27,86 @@ def get_speaker_id(file_name):
     
     
 class MultiSpeakerDataset(Dataset):
-    def __init__(self, data_paths, sample_rate=24000) -> None:
+    def __init__(self, data_paths, use_tar=True) -> None:
         super().__init__()
-        self.sample_rate = sample_rate
         self.speaker_dict = {}
+        self.item_list = []
+        
+        if use_tar:
+            self.prepare_data_tarfile(data_paths)
+        else:
+            self.prepare_data_dir(data_paths)
+        
+    def prepare_data_dir(self, data_paths):
         cwd = get_cwd()    
         cmu_dict = cmudict.CMUDict(cwd + "/tts/process_text/cmu_dictionary")
         
+        ignore_file = set() # Avoid identical data points
         data_paths = data_paths.split(',')
-        ignore_file = set()
-        self.item_list = []
         for data_path in data_paths:
-            print("Prepare dataset:")
+            print("Prepare dataset (directory):")
+            print(data_path)
+            directory = pathlib.Lib(data_path)
+            
+            npy_file = []
+            for path in directory.rglob("*.npy"):
+                npy_file.append(path)
+            txt_file = []
+            for path in directory.rglob("*.txt"):
+                txt_file.append(path)
+                
+            for codec_file in npy_file:
+                if codec_file in ignore_file:
+                    continue
+                codec_code = np.load(codec_file)
+                
+                with open(codec_file.replace(".npy", ".original.txt"), "r") as f:
+                    text = f.read()
+                
+                if codec_file.replace(".npy", ".normalized.txt") not in txt_file:
+                    text_norm = text
+                else:
+                    with open(codec_file.replace(".npy", ".normalized.txt"), "r") as f:
+                        text_norm = f.read()
+                        
+                if len(text_norm) == 0:
+                    continue
+                
+                cmu_sequence = intersperse(
+                    text_to_sequence(text_norm, ["english_cleaners"], cmu_dict),
+                    len(symbols)
+                )
+
+                with open(codec_file.replace(".npy", ".len.txt"), "r") as f:
+                    length = int(float(f.read()))
+                    
+                speaker_id = get_speaker_id(codec_file)
+                if speaker_id not in self.speaker_dict.keys():
+                    self.speaker_dict[speaker_id] = [codec_code]
+                else:
+                    self.speaker_dict[speaker_id].append(codec_code)
+                    
+                self.item_list.append(
+                    {
+                        "code": codec_code / 1023,
+                        "ignore_code": codec_code,
+                        "text": text,
+                        "text_norm": text_norm,
+                        "cmu_sequence": cmu_sequence,
+                        "code_length": length,
+                        "speaker_id": speaker_id
+                    }
+                )
+            ignore_file.update(codec_file)
+    
+    def prepare_data_tarfile(self, data_paths):
+        cwd = get_cwd()    
+        cmu_dict = cmudict.CMUDict(cwd + "/tts/process_text/cmu_dictionary")
+        
+        ignore_file = set() # Avoid identical data points
+        data_paths = data_paths.split(',')
+        for data_path in data_paths:
+            print("Prepare dataset (tarfile):")
             print(data_path)
             tf = tarfile.open(data_path, "r")
             npy_file = []
@@ -51,16 +121,12 @@ class MultiSpeakerDataset(Dataset):
             for codec_file in npy_file:
                 if codec_file in ignore_file:
                     continue
-                # try:
+                
                 array_file = BytesIO()
                 array_file.write(tf.extractfile(codec_file).read())
                 array_file.seek(0)
                 codec_code = np.load(array_file)
                 
-                # Ignore file with duration less than 1s
-                if codec_code.shape[-1] < (1*sample_rate/320):
-                    continue
-            
                 text = TextIOWrapper(
                         tf.extractfile(codec_file.replace(".npy", ".original.txt"))
                     ).read()
@@ -85,45 +151,28 @@ class MultiSpeakerDataset(Dataset):
                 
                 speaker_id = get_speaker_id(codec_file)
                 if speaker_id not in self.speaker_dict.keys():
-                    if length * 320 / sample_rate > 3:
-                        self.speaker_dict[speaker_id] = [codec_code[:, :length]]
-                    else:
-                        self.speaker_dict[speaker_id] = []
+                    # if length * 320 / sample_rate > 3:
+                    #     self.speaker_dict[speaker_id] = [codec_code[:, :length]]
+                    # else:
+                    #     self.speaker_dict[speaker_id] = []
+                    self.speaker_dict[speaker_id] = [codec_code]
                 else:
-                    if length * 320 / sample_rate > 3:
-                        self.speaker_dict[speaker_id].append(codec_code[:, :length])
+                    # if length * 320 / sample_rate > 3:
+                    #     self.speaker_dict[speaker_id].append(codec_code[:, :length])
+                    self.speaker_dict[speaker_id].append(codec_code)
                 
-                if codec_file.replace(".npy", ".normalized.txt") not in txt_file:
-                    self.item_list.append(
-                        {
-                            "code": codec_code / 1023,
-                            "ignore_code": codec_code,
-                            "text": text,
-                            "cmu_sequence": cmu_sequence,
-                            "code_length": length,
-                            "speaker_id": speaker_id
-                        }
-                    )
-                else:                
-                    text_norm = TextIOWrapper(
-                        tf.extractfile(codec_file.replace(".npy", ".normalized.txt"))
-                    ).read()
-                    
-                    self.item_list.append(
-                        {
-                            "code": codec_code / 1023,
-                            "ignore_code": codec_code,
-                            "text": text,
-                            "text_norm": text_norm,
-                            "cmu_sequence": cmu_sequence,
-                            "code_length": length,
-                            "speaker_id": speaker_id
-                        }
-                    )
-                # except:
-                #     continue
-            ignore_file.update(npy_file)
-            
+                self.item_list.append(
+                    {
+                        "code": codec_code / 1023,
+                        "ignore_code": codec_code,
+                        "text": text,
+                        "text_norm": text_norm,
+                        "cmu_sequence": cmu_sequence,
+                        "code_length": length,
+                        "speaker_id": speaker_id
+                    }
+                )
+            ignore_file.update(npy_file)            
             
     def __len__(self):
         return len(self.item_list)
@@ -141,7 +190,7 @@ class MultiSpeakerDataset(Dataset):
         sample_list = [code for code in sample_list if code.all() != ignore_code.all()]
         
         if len(sample_list) == 0:
-            sample = ignore_code[:, :length]
+            sample = ignore_code
         else:
             sample = random.sample(sample_list, k=1)[0]
         
