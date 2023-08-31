@@ -4,7 +4,13 @@ from collections import OrderedDict
 from dataclasses import fields
 from typing import Any, Tuple
 
+from einops import rearrange
+from functools import partial
+import numpy as np
+from typing import Any, Optional, List, Tuple
+
 import torch
+from torch.nn.utils.rnn import pad_sequence
 
 
 def get_cwd():
@@ -91,3 +97,45 @@ def transform_to_code(normalized_code: torch.Tensor) -> np.ndarray:
     codes = (codes * 1023).round().astype('int')
     
     return codes
+
+
+def _create_mask(l, device):
+    """1 is valid region and 0 is invalid."""
+    seq = torch.arange(max(l), device=device).unsqueeze(0)  # (1 t)
+    stop = torch.tensor(l, device=device).unsqueeze(1)  # (b 1)
+    return (seq < stop).float()  # (b t)
+
+
+def list_to_tensor(x_list: List[torch.Tensor], pattern="n b d -> b n d"):
+    """
+    Args:
+        x_list: [(t d)]
+    Returns:
+        x: (? ? ?)
+        m: (? ? ?), same as x
+    """
+    l = list(map(len, x_list))
+    x = rearrange(pad_sequence(x_list), pattern)
+    m = _create_mask(l, x_list[0].device)
+    m = m.t().unsqueeze(-1)  # (n b 1)
+    m = rearrange(m, pattern)
+    m = m.to(x)
+    return x, m
+
+
+def _samplewise_merge_tensors(*l, sep: Optional[torch.Tensor]=None):
+    def _join(x: Tuple[torch.Tensor], sep: torch.Tensor):
+        """
+        Args:
+            x: (k t d)
+            sep: (d)
+        """
+        ret = x[0]
+        for i in range(1, len(x)):
+            ret = torch.cat((ret, sep[None], x[i]), dim=0)
+        return ret
+    if sep is None:
+        cat = torch.cat
+    else:
+        cat = partial(_join, sep=sep)
+    return [*map(cat, zip(*l))]
