@@ -29,6 +29,7 @@ def get_speaker_id(file_name):
 class MultiSpeakerDataset(Dataset):
     def __init__(self, data_paths, use_tar=True) -> None:
         super().__init__()
+        self.normalization = torchvision.transforms.Normalize([0.5], [0.5])
         self.speaker_dict = {}
         self.item_list = []
         
@@ -46,14 +47,14 @@ class MultiSpeakerDataset(Dataset):
         for data_path in data_paths:
             print("Prepare dataset (directory):")
             print(data_path)
-            directory = pathlib.Lib(data_path)
+            directory = pathlib.Path(data_path)
             
             npy_file = []
             for path in directory.rglob("*.npy"):
-                npy_file.append(path)
+                npy_file.append(str(path))
             txt_file = []
             for path in directory.rglob("*.txt"):
-                txt_file.append(path)
+                txt_file.append(str(path))
                 
             for codec_file in npy_file:
                 if codec_file in ignore_file:
@@ -163,7 +164,9 @@ class MultiSpeakerDataset(Dataset):
                 
                 self.item_list.append(
                     {
-                        "code": codec_code / 1023,
+                        "code": self.normalization(
+                            torch.FloatTensor(np.array(codec_code / 1023))
+                        ),
                         "ignore_code": codec_code,
                         "text": text,
                         "text_norm": text_norm,
@@ -179,13 +182,15 @@ class MultiSpeakerDataset(Dataset):
     
     def __getitem__(self, idx):
         item = self.item_list[idx]
-        random_sample = self.get_random_sample(item["speaker_id"], item["ignore_code"], item["code_length"])
+        random_sample = self.get_random_sample(item["speaker_id"], item["ignore_code"])
         
-        item["sample"] = random_sample
+        item["sample"] = self.normalization(
+            torch.FloatTensor(np.array(random_sample / 1023))
+        )
         
         return item
     
-    def get_random_sample(self, speaker_id, ignore_code, length) -> np.ndarray:
+    def get_random_sample(self, speaker_id, ignore_code) -> np.ndarray:
         sample_list = self.speaker_dict[speaker_id]
         sample_list = [code for code in sample_list if code.all() != ignore_code.all()]
         
@@ -200,7 +205,6 @@ class MultiSpeakerDataset(Dataset):
 class TTS_MultiSpkr_Collate_Fn(object):
     def __init__(self, max_seq_length):
         self.max_seq_length = max_seq_length
-        self.normalization = torchvision.transforms.Normalize([0.5], [0.5])
         
     def __call__(self, batch):
         batch_code = []
@@ -210,39 +214,15 @@ class TTS_MultiSpkr_Collate_Fn(object):
         batch_sample = []
         for item in batch:
             batch_code.append(item["code"])
-            batch_text.append(item["text"])
+            batch_text.append(item["text_norm"])
             batch_len.append(item["code_length"])
             batch_cmu.append(torch.tensor(item["cmu_sequence"]))
             batch_sample.append(torch.tensor(item["sample"]))
             
-        # cmu_seq = _collate_batch_helpler(
-        #     batch_cmu, 
-        #     0,
-        #     self.max_seq_length
-        # )
-        
-        if "text_norm" in batch[0].keys():
-            batch_text_norm = [item["text_norm"] for item in batch]
-            
-            return {
-                "code": self.normalization(
-                    torch.FloatTensor(np.array(batch_code))
-                ),
-                "sample": batch_sample,
-                "text": batch_text,
-                "text_norm": batch_text_norm,
-                "code_length": batch_len,
-                "cmu_sequence": batch_cmu,
-                # "cmu_sequence_id": cmu_seq,
-            }
-        else:
-            return {
-                "code": self.normalization(
-                    torch.FloatTensor(np.array(batch_code))
-                ),
-                "sample": batch_sample,
-                "text": batch_text,
-                "code_length": batch_len,
-                "cmu_sequence": batch_cmu,
-                # "cmu_sequence_id": cmu_seq,
-            }
+        return {
+            "code": batch_code,
+            "sample": batch_sample,
+            "text": batch_text,
+            "code_length": batch_len,
+            "cmu_sequence": batch_cmu,
+        }

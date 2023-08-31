@@ -8,13 +8,14 @@ def create_dataloader(
     batch_size,
     max_seq_length,
     data_type,
+    use_tar,
     shuffle=False):
     
     if data_type == "single_speaker":
         dataset = SingleSpeakerDataset(data_file)
         my_collate = TTS_SingleSpkr_Collate_Fn(max_seq_length)
     elif data_type == "multi_speaker":
-        dataset = MultiSpeakerDataset(data_file)
+        dataset = MultiSpeakerDataset(data_file, use_tar=use_tar)
         my_collate = TTS_MultiSpkr_Collate_Fn(max_seq_length)
     
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=my_collate)
