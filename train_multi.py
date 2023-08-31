@@ -14,6 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tts.model.models import TTSMultiSpeaker
 from tts.dataloader.dataloader import create_dataloader
+from tts.utils import list_to_tensor
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
 
@@ -156,6 +157,7 @@ def main(args):
                 code_length = batch["code_length"]
                 
                 # Sample noise
+                codes, _ = list_to_tensor(codes)
                 noise = torch.randn_like(codes).to(accelerator.device)
                 
                 bsz = codes.shape[0]
@@ -175,10 +177,10 @@ def main(args):
                     timesteps,
                     text_seq_ids,
                     spk_code
-                ).sample
+                )
                 
-                unet_loss = F.mse_loss(output_unet.float(), noise.float(), reduction="mean")
-                dp_loss = F.mse_loss(output_dp.float(), code_length, reduction="mean")
+                unet_loss = F.mse_loss(output_unet.sample.float(), noise.float(), reduction="mean")
+                dp_loss = F.mse_loss(output_dp.sample.float(), code_length, reduction="mean")
                 
                 loss = sum([unet_loss, dp_loss])
                 
