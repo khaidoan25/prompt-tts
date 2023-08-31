@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from tts.models import TTSMultiSpeaker
+from tts.model.models import TTSMultiSpeaker
 from tts.dataloader.dataloader import create_dataloader
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
@@ -112,6 +112,7 @@ def main(args):
         args.batch_size,
         args.max_seq_length,
         data_type="multi_speaker",
+        use_tar=args.use_tar,
         shuffle=True
     )
     
@@ -152,6 +153,7 @@ def main(args):
                 codes = batch["code"]
                 text_seq_ids = batch["cmu_sequence"]
                 spk_code = batch["sample"]
+                code_length = batch["code_length"]
                 
                 # Sample noise
                 noise = torch.randn_like(codes).to(accelerator.device)
@@ -168,14 +170,17 @@ def main(args):
                     codes, noise, timesteps
                 )
                 
-                model_pred = model(
+                output_unet, output_dp = model(
                     noisy_codes,
                     timesteps,
                     text_seq_ids,
                     spk_code
                 ).sample
                 
-                loss = F.mse_loss(model_pred.float(), noise.float(), reduction="mean")
+                unet_loss = F.mse_loss(output_unet.float(), noise.float(), reduction="mean")
+                dp_loss = F.mse_loss(output_dp.float(), code_length, reduction="mean")
+                
+                loss = sum([unet_loss, dp_loss])
                 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.batch_size)).mean()
@@ -233,7 +238,7 @@ def parse_args():
                         help="Path to the previous optimizer checkpoint.")
     parser.add_argument('--prev_epoch', type=int, default=0,
                         help="Num trained epoch.")
-
+    parser.add_argument('--use_tar', action='store_true')
 
     return parser.parse_args()
 

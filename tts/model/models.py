@@ -112,7 +112,6 @@ class TTSMultiSpeaker(nn.Module):
     def __init__(
         self,
         config,
-        training: bool
     ) -> None:
         super().__init__()
         self.text_encoder = TextEmbedding(
