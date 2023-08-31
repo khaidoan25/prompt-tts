@@ -718,7 +718,7 @@ class Unet1DConditionModel(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin)
                     encoder_hidden_states=encoder_hidden_states,
                     cross_attention_kwargs=None,
                     upsample_size=upsample_size,
-                    attention_mask=None,
+                    attention_mask=attention_mask,
                 )
                 # print("hidden_states_up_block: ", sample.size())
             else:

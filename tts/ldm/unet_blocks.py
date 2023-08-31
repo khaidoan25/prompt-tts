@@ -393,6 +393,7 @@ class CrossAttnDownBlock1D(nn.Module):
                 hidden_states = resnet(hidden_states, temb)
                 hidden_states = attn(
                     hidden_states,
+                    attention_mask=attention_mask,
                     encoder_hidden_states=encoder_hidden_states,
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
@@ -518,6 +519,7 @@ class CrossAttnUpBlock1D(nn.Module):
                 hidden_states = resnet(hidden_states, temb)
                 hidden_states = attn(
                     hidden_states,
+                    attention_mask=attention_mask,
                     encoder_hidden_states=encoder_hidden_states,
                     cross_attention_kwargs=cross_attention_kwargs,
                 ).sample
@@ -612,6 +614,7 @@ class UNetMidBlock1DCrossAttn(nn.Module):
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
             hidden_states = attn(
                 hidden_states,
+                attention_mask=attention_mask,
                 encoder_hidden_states=encoder_hidden_states,
                 cross_attention_kwargs=cross_attention_kwargs,
             ).sample
