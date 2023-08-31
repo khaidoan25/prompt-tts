@@ -29,7 +29,7 @@ def get_speaker_id(file_name):
 class MultiSpeakerDataset(Dataset):
     def __init__(self, data_paths, use_tar=True) -> None:
         super().__init__()
-        self.normalization = torchvision.transforms.Normalize([0.5], [0.5])
+        # self.normalization = torchvision.transforms.Normalize([0.5], [0.5])
         self.speaker_dict = {}
         self.item_list = []
         
@@ -184,9 +184,7 @@ class MultiSpeakerDataset(Dataset):
         item = self.item_list[idx]
         random_sample = self.get_random_sample(item["speaker_id"], item["ignore_code"])
         
-        item["sample"] = self.normalization(
-            torch.FloatTensor(np.array(random_sample / 1023))
-        )
+        item["sample"] = random_sample / 1023
         
         return item
     
