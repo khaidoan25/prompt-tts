@@ -180,10 +180,9 @@ class TextEncoder(nn.Module):
     
 class TextEmbedding(nn.Embedding):
     def forward(self, x_list: List[torch.Tensor]) -> List[torch.Tensor]:
-        print()
         if len(x_list) == 0:
             return []
-        return super().forward(torch.cat(x_list)).split([x_list*map(len, x_list)])
+        return super().forward(torch.cat(x_list)).split([*map(len, x_list)])
     
     
 class SpeakerEncoder(nn.Module):
