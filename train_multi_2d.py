@@ -139,7 +139,7 @@ def main(args):
         optimizer.load_state_dict(
             torch.load(args.optim_ckpt, map_location=accelerator.device)
         )
-        accelerator.load_state(args.ckpt_dir)
+        # accelerator.load_state(args.ckpt_dir)
     
     # training loop
     global_step = 0
@@ -190,8 +190,9 @@ def main(args):
                     noise.float(), reduction="mean"
                 )
                 dp_loss = F.mse_loss(
-                    output_dp.sample.float(),
-                    code_length.float(), reduction="mean"
+                    output_dp.float(),
+                    torch.FloatTensor(code_length).to(output_dp.device),
+                    reduction="mean"
                 )
                 
                 loss = sum([unet_loss, dp_loss])
@@ -217,11 +218,9 @@ def main(args):
         accelerator.wait_for_everyone()
         if accelerator.is_main_process:
             unwrap_model = accelerator.unwrap_model(model)
-            accelerator.save_state(output_dir=args.ckpt_dir)
             if (epoch + 1) % config["save_per_epochs"] == 0:
                 accelerator.save(unwrap_model.state_dict(), args.ckpt_dir + f"ckpt_{epoch+1}.pt")
                 accelerator.save(optimizer.state_dict(), args.ckpt_dir + f"optim_{epoch+1}.pt")
-                accelerator.save_state(output_dir=args.ckpt_dir)
             
     writer.flush()
     writer.close()
