@@ -2,14 +2,14 @@ import pathlib
 import tarfile
 import random
 import numpy as np
+from tqdm import tqdm
 from io import BytesIO, TextIOWrapper
 
 import torch
-from torch.utils.data import DataLoader, Dataset
-import torchvision
+from torch.utils.data import Dataset
 
 from tts.utils import get_cwd
-from tts.process_text import text_to_sequence, cmudict, sequence_to_text
+from tts.process_text import text_to_sequence, cmudict
 from tts.process_text.symbols import symbols
 
 
@@ -56,10 +56,10 @@ class MultiSpeakerDataset(Dataset):
             for path in directory.rglob("*.txt"):
                 txt_file.append(str(path))
                 
-            for codec_file in npy_file:
+            for codec_file in tqdm(npy_file[:100]):
                 if codec_file in ignore_file:
                     continue
-                codec_code = np.load(codec_file)
+                # codec_code = np.load(codec_file)
                 
                 with open(codec_file.replace(".npy", ".original.txt"), "r") as f:
                     text = f.read()
@@ -83,14 +83,14 @@ class MultiSpeakerDataset(Dataset):
                     
                 speaker_id = get_speaker_id(codec_file)
                 if speaker_id not in self.speaker_dict.keys():
-                    self.speaker_dict[speaker_id] = [codec_code]
+                    self.speaker_dict[speaker_id] = [codec_file]
                 else:
-                    self.speaker_dict[speaker_id].append(codec_code)
+                    self.speaker_dict[speaker_id].append(codec_file)
                     
                 self.item_list.append(
                     {
-                        "code": codec_code / 1023,
-                        "ignore_code": codec_code,
+                        "code": codec_file,
+                        "ignore_code": codec_file,
                         "text": text,
                         "text_norm": text_norm,
                         "cmu_sequence": cmu_sequence,
@@ -126,7 +126,6 @@ class MultiSpeakerDataset(Dataset):
                 array_file = BytesIO()
                 array_file.write(tf.extractfile(codec_file).read())
                 array_file.seek(0)
-                codec_code = np.load(array_file)
                 
                 text = TextIOWrapper(
                         tf.extractfile(codec_file.replace(".npy", ".original.txt"))
@@ -152,22 +151,14 @@ class MultiSpeakerDataset(Dataset):
                 
                 speaker_id = get_speaker_id(codec_file)
                 if speaker_id not in self.speaker_dict.keys():
-                    # if length * 320 / sample_rate > 3:
-                    #     self.speaker_dict[speaker_id] = [codec_code[:, :length]]
-                    # else:
-                    #     self.speaker_dict[speaker_id] = []
-                    self.speaker_dict[speaker_id] = [codec_code]
+                    self.speaker_dict[speaker_id] = [array_file]
                 else:
-                    # if length * 320 / sample_rate > 3:
-                    #     self.speaker_dict[speaker_id].append(codec_code[:, :length])
-                    self.speaker_dict[speaker_id].append(codec_code)
+                    self.speaker_dict[speaker_id].append(array_file)
                 
                 self.item_list.append(
                     {
-                        "code": self.normalization(
-                            torch.FloatTensor(np.array(codec_code / 1023))
-                        ),
-                        "ignore_code": codec_code,
+                        "code": array_file,
+                        "ignore_code": array_file,
                         "text": text,
                         "text_norm": text_norm,
                         "cmu_sequence": cmu_sequence,
@@ -184,13 +175,13 @@ class MultiSpeakerDataset(Dataset):
         item = self.item_list[idx]
         random_sample = self.get_random_sample(item["speaker_id"], item["ignore_code"])
         
-        item["sample"] = random_sample / 1023
+        item["sample"] = random_sample
         
         return item
     
     def get_random_sample(self, speaker_id, ignore_code) -> np.ndarray:
         sample_list = self.speaker_dict[speaker_id]
-        sample_list = [code for code in sample_list if code.all() != ignore_code.all()]
+        sample_list = [code for code in sample_list if code != ignore_code]
         
         if len(sample_list) == 0:
             sample = ignore_code
@@ -211,11 +202,11 @@ class TTS_MultiSpkr_Collate_Fn(object):
         batch_cmu = []
         batch_sample = []
         for item in batch:
-            batch_code.append(item["code"])
+            batch_code.append(torch.Tensor(np.load(item["code"]) / 1023))
             batch_text.append(item["text_norm"])
             batch_len.append(item["code_length"])
             batch_cmu.append(torch.tensor(item["cmu_sequence"]))
-            batch_sample.append(torch.tensor(item["sample"]))
+            batch_sample.append(torch.tensor(np.load(item["sample"])))
             
         return {
             "code": batch_code,
