@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from diffusers import DDPMScheduler
 
-from tts.models import (
+from tts.model.models import (
     TTSSingleSpeaker, TTSMultiSpeaker,
     _samplewise_merge_tensors, list_to_tensor
 )
@@ -61,11 +61,12 @@ def eval_single(args):
     
 def eval_multi(args):
     dataloader = create_dataloader(
-        data_file=args.data_file,
-        batch_size=1,
-        max_seq_length=args.max_seq_length,
-        shuffle=True,
-        data_type="multi_speaker"
+        args.data_files,
+        args.batch_size,
+        args.max_seq_length,
+        data_type="multi_speaker",
+        use_tar=args.use_tar,
+        shuffle=True
     )
     
     config = json.load(open(args.config_file, "r"))
@@ -75,10 +76,6 @@ def eval_multi(args):
     model.eval()
     model.to("cuda")
     
-    text_encoder = model.text_encoder
-    spk_encoder = model.spk_encoder
-    unet = model.unet
-    
     noise_scheduler = DDPMScheduler(
         num_train_timesteps=1000,
         beta_schedule="linear",
@@ -86,10 +83,8 @@ def eval_multi(args):
     )
     
     decode_pipeline = MyPipeline(
-        unet=unet,
+        model=model,
         scheduler=noise_scheduler,
-        in_channels=config["in_channels"],
-        sample_size=config["sample_size"],
     )
     
     total_loss = 0
@@ -98,25 +93,12 @@ def eval_multi(args):
         text_seq_ids = batch["cmu_sequence"] # List of Tensors
         spk_codes = batch["sample"] # List of Tensors
         
-        # text_emb = text_encoder(text_seq_ids.to("cuda"))
-        # spk_emb = spk_encoder(spk_codes.to("cuda"))
-        # spk_emb = torch.permute(spk_emb, (0, 2, 1))
-        # text_emb = torch.concat((text_emb, spk_emb), dim=1)
-        
         text_seq_ids = [item.to("cuda") for item in text_seq_ids]
-        text_emb_list = text_encoder(text_seq_ids)
-        
-        for i in range(len(spk_codes)):
-            spk_codes[i] = rearrange(spk_codes[i], "l n -> n l").to("cuda")
-        spk_emb_list = spk_encoder(spk_codes)
-        
-        input_list = _samplewise_merge_tensors(text_emb_list, spk_emb_list)
-        
-        x, m = list_to_tensor(input_list)
+        spk_codes = [item.to("cuda") for item in spk_codes]
         
         predicted_codes = decode_pipeline(
-            x.to("cuda"),
-            attention_mask=m.to("cuda"),
+            text_seq_ids=text_seq_ids,
+            spk_code=spk_codes,
             num_inference_steps=args.decode_step
         )
         

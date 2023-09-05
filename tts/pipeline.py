@@ -1,55 +1,59 @@
 import torch
+import numpy as np
 from diffusers import DiffusionPipeline
 
 
 class MyPipeline(DiffusionPipeline):
-    def __init__(self, unet, scheduler, in_channels, sample_size):
+    def __init__(self, model, scheduler):
         super().__init__()
 
-        self.register_modules(unet=unet, scheduler=scheduler)
-        self.in_channels = in_channels
-        self.sample_size = sample_size
+        self.register_modules(model=model, scheduler=scheduler)
 
     @torch.no_grad()
     def __call__(
         self,
-        encoder_hidden_states,
+        text_seq_ids,
+        spk_code,
         attention_mask=None,
-        codes=None,
+        channels=8,
+        noisy_codes=None,
         batch_size: int = 1,
         num_inference_steps: int = 50):
         
+        # Predict duration
+        duration = self.model.predict_duration(text_seq_ids)
+        duration = np.ceil(duration[0].cpu())
+        
         # Sample gaussian noise to begin loop
-        if codes is None:
-            codes = torch.randn(
+        if noisy_codes is None:
+            noisy_codes = torch.randn(
                 (
                     batch_size,
-                    self.in_channels,
-                    self.sample_size
+                    channels,
+                    duration
                 )
             )
 
-        codes = codes.to(self.device)
+        noisy_codes = noisy_codes.to(self.device)
         # codes = codes * self.scheduler.init_noise_sigma
 
         # set step values
         self.scheduler.set_timesteps(num_inference_steps)
 
         for t in self.progress_bar(self.scheduler.timesteps):
-            model_input = codes
-            # model_input = self.scheduler.scale_model_input(model_input, t)
             
             # 1. predict noise model_output
-            noise_pred = self.unet(
-                sample=model_input,
+            noise_pred = self.model.predict_unet(
+                sample=noisy_codes,
                 timestep=t,
-                encoder_hidden_states=encoder_hidden_states,
+                text_seq_ids=text_seq_ids,
+                spk_code=spk_code,
                 attention_mask=attention_mask
             ).sample
 
             # 2. predict previous mean of image x_t-1 and add variance depending on eta
             # eta corresponds to η in paper and should be between [0, 1]
             # do x_t -> x_t-1
-            codes = self.scheduler.step(noise_pred, t, codes).prev_sample
+            noisy_codes = self.scheduler.step(noise_pred, t, noisy_codes).prev_sample
 
-        return codes
+        return noisy_codes
