@@ -32,7 +32,7 @@ def create_batch(members, ignore_list, tf=None):
             wav = convert_audio(wav, sr, model.sample_rate, model.channels)
             wav = wav.unsqueeze(0)
             
-            yield wav, member.name, np.ceil(wav.shape[1] / 320)
+            yield wav, member.name, np.ceil(wav.shape[-1] / 320)
     else:
         for member in members:
             if member.split('/')[-1] in ignore_list:
@@ -43,7 +43,7 @@ def create_batch(members, ignore_list, tf=None):
             wav = convert_audio(wav, sr, model.sample_rate, model.channels)
             wav = wav.unsqueeze(0)
             
-            yield wav, member, np.ceil(wav.shape[1] / 320)
+            yield wav, member, np.ceil(wav.shape[-1] / 320)
 
 
 def generate(batch):
