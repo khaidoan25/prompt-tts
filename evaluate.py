@@ -9,8 +9,7 @@ import torch.nn.functional as F
 from diffusers import DDPMScheduler
 
 from tts.model.models import (
-    TTSSingleSpeaker, TTSMultiSpeaker,
-    _samplewise_merge_tensors, list_to_tensor
+    TTSSingleSpeaker, TTSMultiSpeaker2D,
 )
 from tts.dataloader.dataloader import create_dataloader
 from tts.pipeline import MyPipeline
@@ -21,7 +20,7 @@ def eval_single(args):
         data_file=args.data_file,
         batch_size=1,
         max_seq_length=args.max_seq_length,
-        shuffle=True,
+        shuffle=False,
         data_type="single_speaker"
     )
     
@@ -61,7 +60,7 @@ def eval_single(args):
     
 def eval_multi(args):
     dataloader = create_dataloader(
-        args.data_files,
+        args.data_file,
         args.batch_size,
         args.max_seq_length,
         data_type="multi_speaker",
@@ -70,7 +69,7 @@ def eval_multi(args):
     )
     
     config = json.load(open(args.config_file, "r"))
-    model = TTSMultiSpeaker(config)
+    model = TTSMultiSpeaker2D(config)
     
     model.load_state_dict(torch.load(args.ckpt_path))
     model.eval()
@@ -92,9 +91,6 @@ def eval_multi(args):
         codes = batch["code"]
         text_seq_ids = batch["cmu_sequence"] # List of Tensors
         spk_codes = batch["sample"] # List of Tensors
-        
-        text_seq_ids = [item.to("cuda") for item in text_seq_ids]
-        spk_codes = [item.to("cuda") for item in spk_codes]
         
         predicted_codes = decode_pipeline(
             text_seq_ids=text_seq_ids,
@@ -132,6 +128,8 @@ def parse_args():
     parser.add_argument('--max_seq_length', type=int, default=550,
                         help="Maximum length of cmu sequence.")
     parser.add_argument('--data_type', type=str, required=True)
+    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--use_tar', action='store_true')
 
 
     return parser.parse_args()

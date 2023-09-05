@@ -263,6 +263,7 @@ class TTSMultiSpeaker2D(nn.Module):
         self,
         text_seq_ids: List[torch.Tensor]
     ):
+        text_seq_ids = [item.to("cuda") for item in text_seq_ids]
         text_emb_list = self.text_encoder(text_seq_ids) # list of [l, d]
         
         x_dp, m_dp = list_to_tensor(text_emb_list) # [b, l, d], [b, l, 1]
@@ -278,23 +279,12 @@ class TTSMultiSpeaker2D(nn.Module):
         self,
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
-        text_seq_ids: List[torch.Tensor],
-        spk_code: List[torch.Tensor],
-    ):
-        text_emb_list = self.text_encoder(text_seq_ids) # list of [l, d]
-        
-        for i in range(len(spk_code)):
-            spk_code[i] = rearrange(spk_code[i], "l n -> n l")
-        spk_emb_list = self.spk_encoder(spk_code)
-
-        input_list = _samplewise_merge_tensors(text_emb_list, spk_emb_list)
-        
-        x, _ = list_to_tensor(input_list)
-        
+        encoder_hidden_states: torch.FloatTensor
+    ):        
         unet_output = self.unet(
             sample=sample,
             timestep=timestep,
-            encoder_hidden_states=x,
+            encoder_hidden_states=encoder_hidden_states,
         )
         
         return unet_output
